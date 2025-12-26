@@ -103,90 +103,88 @@ def page_calendar_template_maker():
                         st.code(traceback.format_exc())
     
     with tab2:
-        st.markdown("### 手动添加/编辑标签")
-        st.info("手动指定文档中需要替换为标签的文本")
-        
-        if uploaded_file:
-            # 读取文档内容供手动编辑
-            try:
-                uploaded_file.seek(0)
-                doc = Document(io.BytesIO(uploaded_file.read()))
-                uploaded_file.seek(0)
-                
-                # 提取所有段落
-                paragraphs = []
-                for i, para in enumerate(doc.paragraphs):
-                    if para.text.strip():
-                        paragraphs.append({
-                            "id": i,
-                            "text": para.text,
-                            "tag": ""
-                        })
-                
-                # 手动编辑界面
-                st.markdown("#### 手动编辑标签")
-                
-                # 显示前50段供编辑
-                for i, para in enumerate(paragraphs[:50]):
-                    cols = st.columns([3, 1])
-                    with cols[0]:
-                        st.text_input(
-                            f"段落 {i+1}",
-                            value=para["text"],
-                            key=f"para_text_{i}",
-                            disabled=True
-                        )
-                    with cols[1]:
-                        tag_input = st.text_input(
-                            "标签名",
-                            value=para.get("tag", ""),
-                            key=f"para_tag_{i}",
-                            placeholder="如: course_name"
-                        )
-                        if tag_input:
-                            paragraphs[i]["tag"] = tag_input
-                
-                # 批量添加标签
-                st.markdown("---")
-                st.markdown("#### 批量添加标签")
-                
-                col_a, col_b, col_c = st.columns(3)
-                with col_a:
-                    search_text = st.text_input("搜索文本")
-                with col_b:
-                    replace_tag = st.text_input("替换为标签")
-                with col_c:
-                    if st.button("批量替换", type="secondary"):
-                        if search_text and replace_tag:
-                            for para in paragraphs:
-                                if search_text in para["text"]:
-                                    para["tag"] = replace_tag
-                            st.rerun()
-                
-                # 生成模板
-                if st.button("🛠️ 生成手动标签化模板", type="primary"):
-                    try:
-                        # 重新读取原始文档
-                        uploaded_file.seek(0)
-                        doc_bytes = uploaded_file.read()
-                        
-                        # 应用手动标签
-                        processed_doc = manual_tag_document(doc_bytes, paragraphs)
-                        
-                        # 保存并下载
-                        st.session_state.tagged_template = processed_doc
-                        
-                        st.success("✅ 手动标签化完成！")
-                        
-                        st.download_button(
-                            label="📥 下载手动标签化模板",
-                            data=processed_doc,
-                            file_name="手动标签化_教学日历.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
-                        
-                    except Exception as e:
-                        st.error(f"处理失败: {str(e)}")
+    with tab2:
+            st.markdown("### 手动添加/编辑标签")
+            st.info("手动指定文档中需要替换为标签的文本")
+            
+            if uploaded_file:
+                # 修复：包裹 try 块
+                try:
+                    # 读取文档内容供手动编辑
+                    uploaded_file.seek(0)
+                    doc = Document(io.BytesIO(uploaded_file.read()))
+                    uploaded_file.seek(0)
+                    
+                    # 提取所有段落
+                    paragraphs = []
+                    for i, para in enumerate(doc.paragraphs):
+                        if para.text.strip():
+                            paragraphs.append({
+                                "id": i,
+                                "text": para.text,
+                                "tag": ""
+                            })
+                    
+                    # 手动编辑界面
+                    st.markdown("#### 手动编辑标签")
+                    
+                    # 显示前50段供编辑
+                    for i, para in enumerate(paragraphs[:50]):
+                        cols = st.columns([3, 1])
+                        with cols[0]:
+                            st.text_input(
+                                f"段落 {i+1}",
+                                value=para["text"],
+                                key=f"para_text_{i}",
+                                disabled=True
+                            )
+                        with cols[1]:
+                            tag_input = st.text_input(
+                                "标签名",
+                                value=para.get("tag", ""),
+                                key=f"para_tag_{i}",
+                                placeholder="如: course_name"
+                            )
+                            if tag_input:
+                                paragraphs[i]["tag"] = tag_input
+
+                    # --- 批量添加标签 ---
+                    st.markdown("---")
+                    st.markdown("#### 批量添加标签")
+                    
+                    col_a, col_b, col_c = st.columns(3)
+                    with col_a:
+                        search_text = st.text_input("搜索文本")
+                    with col_b:
+                        replace_tag = st.text_input("替换为标签")
+                    with col_c:
+                        if st.button("批量替换", type="secondary"):
+                            if search_text and replace_tag:
+                                for para in paragraphs:
+                                    if search_text in para["text"]:
+                                        para["tag"] = replace_tag
+                                st.rerun()
+                    
+                    # --- 生成模板 ---
+                    if st.button("🛠️ 生成手动标签化模板", type="primary"):
+                        try:
+                            uploaded_file.seek(0)
+                            doc_bytes = uploaded_file.read()
+                            processed_doc = manual_tag_document(doc_bytes, paragraphs)
+                            st.session_state.tagged_template = processed_doc
+                            st.success("✅ 手动标签化完成！")
+                            st.download_button(
+                                label="📥 下载手动标签化模板",
+                                data=processed_doc,
+                                file_name="手动标签化_教学日历.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+                        except Exception as e:
+                            st.error(f"处理失败: {str(e)}")
+
+                # --- 新增这个 except 块来修复错误 ---
+                except Exception as e:
+                    st.error(f"读取文档失败: {e}")
     
     # 模板示例部分
     st.markdown("---")
