@@ -103,7 +103,6 @@ def page_calendar_template_maker():
                         st.code(traceback.format_exc())
     
     with tab2:
-    with tab2:
             st.markdown("### 手动添加/编辑标签")
             st.info("手动指定文档中需要替换为标签的文本")
             
