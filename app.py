@@ -1,581 +1,519 @@
-import json
-import io
-import re
-from docxtpl import DocxTemplate
+import os
 import streamlit as st
+import pdfplumber
+import fitz  # PyMuPDF
 from docx import Document
-from docx.shared import RGBColor, Pt
-from docx.enum.text import WD_COLOR_INDEX
-import zipfile
-import xml.etree.ElementTree as ET
+from docx.shared import Pt
+import mammoth
+import requests
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from openai import OpenAI
+import base64
+import io
+from PIL import Image
+import google.generativeai as genai
 
-def page_calendar_template_maker():
-    """
-    将上传的Word文档转换为带标签的模板
-    """
-    st.subheader("🛠️ Word文档标签化工具")
-    st.markdown("将您的Word文档转换为带`{{标签}}`的模板文件")
-    
-    # 创建两个选项卡
-    tab1, tab2 = st.tabs(["📤 自动标签化", "✏️ 手动添加标签"])
-    
-    with tab1:
-        st.markdown("### 自动标签化（智能识别）")
-        st.info("系统将尝试识别文档中的特定内容并自动替换为标签")
-        
-        # 上传原始文档
-        uploaded_file = st.file_uploader(
-            "上传原始Word文档", 
-            type=['docx'],
-            help="请上传.docx格式的Word文档"
-        )
-        
-        if uploaded_file:
-            # 预览原始内容
-            if st.checkbox("预览原始文档内容"):
-                try:
-                    doc = Document(io.BytesIO(uploaded_file.read()))
-                    uploaded_file.seek(0)  # 重置文件指针
-                    
-                    preview_text = []
-                    for i, para in enumerate(doc.paragraphs[:20]):  # 限制预览前20段
-                        if para.text.strip():
-                            preview_text.append(f"第{i+1}段: {para.text}")
-                    
-                    if preview_text:
-                        st.text_area("文档内容预览", "\n".join(preview_text), height=200)
-                    else:
-                        st.warning("文档内容为空或无法读取")
-                except Exception as e:
-                    st.error(f"读取文档失败: {e}")
-            
-            # 自动标签化选项
-            col1, col2 = st.columns(2)
-            with col1:
-                auto_tags = st.multiselect(
-                    "选择要自动替换的内容类型",
-                    ["课程名称", "学时数", "周数", "教师姓名", "教材信息", "考核方式", "日期"],
-                    default=["课程名称", "学时数", "周数"]
-                )
-            
-            with col2:
-                highlight_color = st.selectbox(
-                    "标签高亮颜色",
-                    ["黄色", "绿色", "蓝色", "粉色", "灰色"],
-                    index=0
-                )
-            
-            # 转换按钮
-            if st.button("🔄 开始自动标签化", type="primary"):
-                with st.spinner("正在处理文档..."):
-                    try:
-                        # 读取上传的文件
-                        uploaded_file.seek(0)
-                        doc_bytes = uploaded_file.read()
-                        
-                        # 进行自动标签化
-                        processed_doc, tag_count = auto_tag_document(
-                            doc_bytes, 
-                            auto_tags,
-                            highlight_color
-                        )
-                        
-                        # 保存到session_state
-                        st.session_state.tagged_template = processed_doc
-                        
-                        # 显示统计信息
-                        st.success(f"✅ 标签化完成！共添加/替换了 {tag_count} 个标签")
-                        
-                        # 预览部分标签
-                        if st.checkbox("预览生成的标签"):
-                            preview_tags(processed_doc)
-                        
-                        # 提供下载
-                        st.download_button(
-                            label="📥 下载标签化模板",
-                            data=processed_doc,
-                            file_name="标签化模板_教学日历.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
-                        
-                    except Exception as e:
-                        st.error(f"处理失败: {str(e)}")
-                        st.code(traceback.format_exc())
-    
-    with tab2:
-            st.markdown("### 手动添加/编辑标签")
-            st.info("手动指定文档中需要替换为标签的文本")
-            
-            if uploaded_file:
-                # 修复：包裹 try 块
-                try:
-                    # 读取文档内容供手动编辑
-                    uploaded_file.seek(0)
-                    doc = Document(io.BytesIO(uploaded_file.read()))
-                    uploaded_file.seek(0)
-                    
-                    # 提取所有段落
-                    paragraphs = []
-                    for i, para in enumerate(doc.paragraphs):
-                        if para.text.strip():
-                            paragraphs.append({
-                                "id": i,
-                                "text": para.text,
-                                "tag": ""
-                            })
-                    
-                    # 手动编辑界面
-                    st.markdown("#### 手动编辑标签")
-                    
-                    # 显示前50段供编辑
-                    for i, para in enumerate(paragraphs[:50]):
-                        cols = st.columns([3, 1])
-                        with cols[0]:
-                            st.text_input(
-                                f"段落 {i+1}",
-                                value=para["text"],
-                                key=f"para_text_{i}",
-                                disabled=True
-                            )
-                        with cols[1]:
-                            tag_input = st.text_input(
-                                "标签名",
-                                value=para.get("tag", ""),
-                                key=f"para_tag_{i}",
-                                placeholder="如: course_name"
-                            )
-                            if tag_input:
-                                paragraphs[i]["tag"] = tag_input
 
-                    # --- 批量添加标签 ---
-                    st.markdown("---")
-                    st.markdown("#### 批量添加标签")
-                    
-                    col_a, col_b, col_c = st.columns(3)
-                    with col_a:
-                        search_text = st.text_input("搜索文本")
-                    with col_b:
-                        replace_tag = st.text_input("替换为标签")
-                    with col_c:
-                        if st.button("批量替换", type="secondary"):
-                            if search_text and replace_tag:
-                                for para in paragraphs:
-                                    if search_text in para["text"]:
-                                        para["tag"] = replace_tag
-                                st.rerun()
-                    
-                    # --- 生成模板 ---
-                    if st.button("🛠️ 生成手动标签化模板", type="primary"):
-                        try:
-                            uploaded_file.seek(0)
-                            doc_bytes = uploaded_file.read()
-                            processed_doc = manual_tag_document(doc_bytes, paragraphs)
-                            st.session_state.tagged_template = processed_doc
-                            st.success("✅ 手动标签化完成！")
-                            st.download_button(
-                                label="📥 下载手动标签化模板",
-                                data=processed_doc,
-                                file_name="手动标签化_教学日历.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                        except Exception as e:
-                            st.error(f"处理失败: {str(e)}")
 
-                # --- 新增这个 except 块来修复错误 ---
-                except Exception as e:
-                    st.error(f"读取文档失败: {e}")
-    
-    # 模板示例部分
-    st.markdown("---")
-    with st.expander("📚 标签使用示例"):
-        st.markdown("""
-        ### 常用标签示例
-        
-        | 标签 | 说明 | 示例 |
-        |------|------|------|
-        | `{{course_name}}` | 课程名称 | `{{course_name}}` |
-        | `{{english_name}}` | 英文课程名 | `{{english_name}}` |
-        | `{{total_hours}}` | 总学时 | `{{total_hours}}` |
-        | `{{total_weeks}}` | 总周数 | `{{total_weeks}}` |
-        | `{{teacher}}` | 教师姓名 | `{{teacher}}` |
-        | `{{textbook}}` | 教材信息 | `{{textbook}}` |
-        | `{{assessment}}` | 考核方式 | `{{assessment}}` |
-        | `{{semester}}` | 学期 | `{{semester}}` |
-        
-        ### 表格循环标签示例
-        
-        对于教学日历表格，使用循环标签：
-        ```python
-        {% for week in calendar_table %}
-        <tr>
-            <td>{{ week.week_num }}</td>
-            <td>{{ week.content }}</td>
-            <td>{{ week.hours }}</td>
-            <td>{{ week.method }}</td>
-        </tr>
-        {% endfor %}
-        ```
-        
-        ### 条件标签示例
-        
-        ```python
-        {% if is_required %}
-        必修课
-        {% else %}
-        选修课
-        {% endif %}
-        ```
-        """)
-        
-        # 提供空白模板下载
-        st.markdown("### 下载空白模板")
-        blank_template = create_blank_template()
-        st.download_button(
-            label="📄 下载空白标签模板",
-            data=blank_template,
-            file_name="教学日历_空白模板.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+# --- 1. 基础环境与配置 ---
+plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False
 
-def auto_tag_document(doc_bytes, tag_types, highlight_color):
-    """
-    自动将文档中的特定内容替换为标签
-    """
-    # 颜色映射
-    color_map = {
-        "黄色": WD_COLOR_INDEX.YELLOW,
-        "绿色": WD_COLOR_INDEX.GREEN,
-        "蓝色": WD_COLOR_INDEX.BLUE,
-        "粉色": WD_COLOR_INDEX.PINK,
-        "灰色": WD_COLOR_INDEX.GRAY_25
-    }
-    
-    # 读取文档
-    doc = Document(io.BytesIO(doc_bytes))
-    
-    # 常见的替换模式
-    patterns = {
-        "课程名称": [
-            r"课程名称[：:]\s*([^\n]+)",
-            r"《([^》]+)》课程",
-            r"课程[：:]\s*([^\n]+)"
-        ],
-        "学时数": [
-            r"(\d+)\s*学时",
-            r"总学时[：:]\s*(\d+)",
-            r"(\d+)\s*小时"
-        ],
-        "周数": [
-            r"(\d+)\s*周",
-            r"总周数[：:]\s*(\d+)",
-            r"教学周数[：:]\s*(\d+)"
-        ],
-        "教师姓名": [
-            r"教师[：:]\s*([^\n]+)",
-            r"主讲教师[：:]\s*([^\n]+)",
-            r"任课教师[：:]\s*([^\n]+)"
-        ],
-        "教材信息": [
-            r"教材[：:]\s*([^\n]+)",
-            r"参考书目[：:]\s*([^\n]+)",
-            r"使用教材[：:]\s*([^\n]+)"
-        ],
-        "考核方式": [
-            r"考核方式[：:]\s*([^\n]+)",
-            r"成绩评定[：:]\s*([^\n]+)",
-            r"考试方式[：:]\s*([^\n]+)"
-        ],
-        "日期": [
-            r"\d{4}年\d{1,2}月\d{1,2}日",
-            r"\d{4}-\d{1,2}-\d{1,2}",
-            r"\d{4}/\d{1,2}/\d{1,2}"
-        ]
-    }
-    
-    tag_count = 0
-    
-    # 处理段落
-    for para in doc.paragraphs:
-        original_text = para.text
-        if not original_text.strip():
-            continue
-            
-        modified_text = original_text
-        
-        # 对每个选中的标签类型进行处理
-        for tag_type in tag_types:
-            if tag_type in patterns:
-                for pattern in patterns[tag_type]:
-                    # 查找匹配
-                    matches = list(re.finditer(pattern, original_text, re.IGNORECASE))
-                    matches.reverse()  # 从后往前替换，避免位置偏移
-                    
-                    for match in matches:
-                        # 获取匹配的文本
-                        matched_text = match.group(0)
-                        
-                        # 生成标签
-                        tag_name = generate_tag_name(tag_type, matched_text)
-                        
-                        # 替换文本
-                        start = match.start()
-                        end = match.end()
-                        modified_text = modified_text[:start] + f"{{{{{tag_name}}}}}" + modified_text[end:]
-                        
-                        tag_count += 1
-        
-        # 如果文本被修改，更新段落
-        if modified_text != original_text:
-            para.clear()
-            run = para.add_run(modified_text)
-            
-            # 高亮显示
-            if highlight_color in color_map:
-                run.font.highlight_color = color_map[highlight_color]
-    
-    # 处理表格
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    original_text = para.text
-                    if not original_text.strip():
-                        continue
-                    
-                    modified_text = original_text
-                    
-                    # 对每个选中的标签类型进行处理
-                    for tag_type in tag_types:
-                        if tag_type in patterns:
-                            for pattern in patterns[tag_type]:
-                                matches = list(re.finditer(pattern, original_text, re.IGNORECASE))
-                                matches.reverse()
-                                
-                                for match in matches:
-                                    matched_text = match.group(0)
-                                    tag_name = generate_tag_name(tag_type, matched_text)
-                                    
-                                    start = match.start()
-                                    end = match.end()
-                                    modified_text = modified_text[:start] + f"{{{{{tag_name}}}}}" + modified_text[end:]
-                                    
-                                    tag_count += 1
-                    
-                    if modified_text != original_text:
-                        para.clear()
-                        run = para.add_run(modified_text)
-                        if highlight_color in color_map:
-                            run.font.highlight_color = color_map[highlight_color]
-    
-    # 保存到内存
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
-    
-    return output.getvalue(), tag_count
+st.set_page_config(page_title="智能教学辅助系统", layout="wide", initial_sidebar_state="expanded")
 
-def manual_tag_document(doc_bytes, paragraphs):
-    """
-    应用手动定义的标签
-    """
-    # 读取文档
-    doc = Document(io.BytesIO(doc_bytes))
-    
-    # 创建段落映射
-    para_map = {}
-    for i, para in enumerate(doc.paragraphs):
-        if para.text.strip():
-            para_map[i] = para
-    
-    # 应用标签
-    for para_info in paragraphs:
-        para_id = para_info["id"]
-        tag = para_info.get("tag", "").strip()
-        
-        if tag and para_id in para_map:
-            para = para_map[para_id]
-            original_text = para.text
-            
-            # 如果原文本包含可能被替换的内容，进行替换
-            # 这里简化处理：如果用户指定了标签，就用标签替换整个段落
-            # 实际应用中可能需要更精细的替换逻辑
-            
-            # 检查文本是否看起来像需要替换的内容
-            if (len(original_text) < 100 and  # 不是大段文本
-                not original_text.startswith((' ', '\t')) and  # 不是缩进段落
-                tag not in original_text):  # 标签还不存在
-                
-                para.clear()
-                run = para.add_run(f"{{{{{tag}}}}}")
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-    
-    # 保存到内存
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
-    
-    return output.getvalue()
+# --- 3. 密钥获取与侧边栏 ---
+BACKEND_QWEN_KEY = st.secrets.get("QWEN_API_KEY", "")
+BACKEND_GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-def generate_tag_name(tag_type, text):
-    """
-    根据标签类型和文本生成标签名
-    """
-    # 基础映射
-    base_names = {
-        "课程名称": "course_name",
-        "学时数": "total_hours",
-        "周数": "total_weeks",
-        "教师姓名": "teacher_name",
-        "教材信息": "textbook_info",
-        "考核方式": "assessment_method",
-        "日期": "course_date"
-    }
+# --- 2. 状态自动化初始化 (防止变量未定义报错) ---
+# 初始化全局会话状态
+if "score_records" not in st.session_state:
+    st.session_state.score_records = []
+if "generated_syllabus" not in st.session_state:
+    st.session_state.generated_syllabus = None
+if "generated_calendar" not in st.session_state:
+    st.session_state.generated_calendar = None
+if "generated_program" not in st.session_state:
+    st.session_state.generated_program = None
+# 使用 setdefault 确保变量一定存在
+st.session_state.setdefault("score_records", [])
+st.session_state.setdefault("gen_content", {"syllabus": None, "calendar": None, "program": None})
+# --- 3. 侧边栏：引擎切换与密钥管理 ---
+with st.sidebar:
+    st.header("⚙️ 模型引擎设置")
+    selected_provider = st.radio("选择主 AI 引擎", ["Gemini", "Qwen (通义千问)"])
     
-    if tag_type in base_names:
-        base_name = base_names[tag_type]
-    else:
-        # 从文本生成简化的标签名
-        base_name = re.sub(r'[^\w]', '_', tag_type.lower())
-    
-    return base_name
+    ACTIVE_QWEN_KEY = BACKEND_QWEN_KEY
+    ACTIVE_GEMINI_KEY = BACKEND_GEMINI_KEY
 
-def preview_tags(doc_bytes):
-    """
-    预览文档中的标签
-    """
-    try:
-        doc = Document(io.BytesIO(doc_bytes))
-        
-        tags_found = []
-        for para in doc.paragraphs:
-            text = para.text
-            # 查找所有 {{...}} 模式的标签
-            matches = re.findall(r'\{\{([^}]+)\}\}', text)
-            if matches:
-                tags_found.extend(matches)
-        
-        # 检查表格
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for para in cell.paragraphs:
-                        text = para.text
-                        matches = re.findall(r'\{\{([^}]+)\}\}', text)
-                        if matches:
-                            tags_found.extend(matches)
-        
-        if tags_found:
-            st.markdown("### 检测到的标签")
-            # 去重并排序
-            unique_tags = sorted(set(tags_found))
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**标签列表:**")
-                for tag in unique_tags:
-                    st.code(f"{{{{{tag}}}}}", language=None)
-            
-            with col2:
-                st.markdown("**统计信息:**")
-                st.write(f"总标签数: {len(tags_found)}")
-                st.write(f"唯一标签数: {len(unique_tags)}")
-                
-                # 标签类型统计
-                tag_types = {}
-                for tag in unique_tags:
-                    if '_' in tag:
-                        prefix = tag.split('_')[0]
-                    else:
-                        prefix = tag
-                    tag_types[prefix] = tag_types.get(prefix, 0) + 1
-                
-                st.markdown("**标签类型分布:**")
-                for prefix, count in tag_types.items():
-                    st.write(f"- {prefix}: {count}个")
+    if selected_provider == "Gemini":
+        user_gem_key = st.text_input("填写 Gemini API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_gem_key: ACTIVE_GEMINI_KEY = user_gem_key
+        selected_model = st.selectbox("版本", ["gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-2.5-pro"])
+        engine_id = "Gemini"
+        if ACTIVE_GEMINI_KEY: 
+            genai.configure(api_key=ACTIVE_GEMINI_KEY)
         else:
-            st.warning("未检测到任何标签。请确保标签格式为 {{标签名}}")
-            
-    except Exception as e:
-        st.error(f"预览失败: {e}")
+            st.error("⚠️ 未检测到有效 Gemini Key")
+    else:
+        user_qw_key = st.text_input("填写 Qwen API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_qw_key: ACTIVE_QWEN_KEY = user_qw_key
+        selected_model = st.selectbox("版本", ["qwen-plus", "qwen-max", "qwen-turbo"])
+        engine_id = "Qwen"
+        if not ACTIVE_QWEN_KEY:
+            st.error("⚠️ 未检测到有效 Qwen Key")
 
-def create_blank_template():
-    """
-    创建一个带示例标签的空白模板
-    """
+    st.divider()
+    st.info(f"💡 当前模式：使用 **{engine_id}** 处理。")
+    # 侧边栏底部也可以加提示
+    st.caption("🖥️ 建议环境：Google Chrome 浏览器")
+    
+# --- 4. 核心功能函数 --- 
+def create_docx(text):
+    """将文本转换为可下载的 Word，彻底清洗所有标记"""
     doc = Document()
     
-    # 标题
-    title = doc.add_heading('教学日历', 0)
-    title_run = title.runs[0]
-    title_run.font.size = Pt(22)
+    # 1. 首先通过正则表达式清除所有 HTML 标签 (如 <br/>)
+    # 2. 接着通过链式 replace 清除 Markdown 的标题号和加粗符号
+    clean_text = re.sub('<[^<]+?>', '', text) \
+                   .replace("### ", "") \
+                   .replace("## ", "") \
+                   .replace("# ", "") \
+                   .replace("**", "")
     
-    # 基本信息
-    doc.add_heading('一、课程基本信息', level=1)
+    # 写入 Word
+    for line in clean_text.split('\n'):
+        if line.strip(): # 过滤掉多余的空行
+            p = doc.add_paragraph(line)
+            p.style.font.size = Pt(12)
+    
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
 
-    # 数据行
-    data_rows = [
-        ('课程名称', '{{course_name}}'),
-        ('英文名称', '{{english_name}}'),
-        ('课程编码', '{{course_code}}'),
-        ('总学时', '{{total_hours}}'),
-        ('学分数', '{{credits}}'),
-        ('开课学期', '{{semester}}')
+
+
+def ai_generate(prompt, provider, model_name):
+    """统一文本生成接口"""
+    if provider == "Gemini":
+        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e: return f"Gemini 失败: {str(e)}"
+    else:
+        if not ACTIVE_QWEN_KEY: return "错误：未配置密钥"
+        client = OpenAI(api_key=ACTIVE_QWEN_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+        try:
+            completion = client.chat.completions.create(model=model_name, messages=[{"role": "user", "content": prompt}])
+            return completion.choices[0].message.content
+        except Exception as e: return f"Qwen 失败: {str(e)}"
+
+def ai_ocr(image_bytes, provider, model_name):
+    """根据引擎进行图片文字识别"""
+    if provider == "Gemini":
+        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
+        try:
+            model = genai.GenerativeModel(model_name)
+            res = model.generate_content(["识别并输出图中文字内容。若是试卷，请提取题目和回答。", {"mime_type": "image/jpeg", "data": image_bytes}])
+            return res.text
+        except Exception as e: return f"Gemini 视觉识别失败: {str(e)}"
+    else:
+        if not ACTIVE_QWEN_KEY: return "错误：未配置密钥"
+        # 图片压缩优化
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        max_width = 1024
+        if img.width > max_width:
+            scale = max_width / img.width
+            img = img.resize((max_width, int(img.height * scale)))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        b64img = base64.b64encode(buf.getvalue()).decode("utf-8")
+        
+        client = OpenAI(api_key=ACTIVE_QWEN_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+        try:
+            completion = client.chat.completions.create(
+                model="qwen-vl-ocr-latest",
+                messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64img}"}}, {"type": "text", "text": "请提取图中所有文字内容"}]}]
+            )
+            return completion.choices[0].message.content
+        except Exception as e: return f"Qwen OCR 失败: {str(e)}"
+
+# --- 5. 文档与工具函数 ---
+def extract_text_from_file(file):
+    """支持多格式文本提取"""
+    try:
+        if file.name.endswith(".docx"):
+            return "\n".join([p.text for p in Document(file).paragraphs])
+        elif file.name.endswith(".pdf"):
+            with pdfplumber.open(file) as pdf:
+                return "\n".join([page.extract_text() or "" for page in pdf.pages])
+        elif file.name.endswith(".doc"):
+            return mammoth.convert_to_text(file).value
+        return "格式暂不支持"
+    except Exception as e:
+        return f"解析失败: {str(e)}"
+
+
+def safe_extract_text(file, max_chars=15000):
+    """高性能、低内存占用文本提取 (针对大教材优化)"""
+    if not file: return ""
+    try:
+        text_list = []
+        if file.name.endswith(".pdf"):
+            # 使用 PyMuPDF (fitz) 进行流式读取，内存占用极小
+            with fitz.open(stream=file.read(), filetype="pdf") as doc:
+                for page in doc:
+                    text_list.append(page.get_text())
+                    # 达到长度限制即刻停止解析，防止内存溢出
+                    if sum(len(t) for t in text_list) > max_chars:
+                        break
+            return "".join(text_list)[:max_chars]
+            
+        elif file.name.endswith(".docx"):
+            doc = Document(file)
+            full_text = [p.text for p in doc.paragraphs]
+            return "\n".join(full_text)[:max_chars]
+            
+        elif file.name.endswith(".doc"):
+            return mammoth.convert_to_text(file).value[:max_chars]
+            
+        return ""
+    except Exception as e:
+        st.error(f"文件 {file.name} 解析出错: {str(e)}")
+        return ""
+
+
+def render_pdf_images(pdf_file):
+    images = []
+    pdf_file.seek(0)
+    with fitz.open(stream=pdf_file.read(), filetype="pdf") as pdf:
+        for page in pdf:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2,2))
+            images.append(pix.tobytes("png"))
+    return images
+
+def nav_bar(show_back=False):
+    st.markdown(f'<div style="background:#1E2129;padding:20px;border-radius:10px;margin-bottom:10px;"><h1 style="color:white;margin:0;font-size:24px;">🎓 智能教学与批卷系统 <span style="font-size:14px;color:#888;">{engine_id} 引擎在线</span></h1></div>', unsafe_allow_html=True)
+    if show_back:
+        if st.button("⬅️ 返回主页", use_container_width=True):
+            st.query_params["page"] = "首页"
+            st.rerun()
+
+# --- 6. 页面功能定义 ---
+def page_home():
+    nav_bar()
+    st.markdown("### 🛠️ 教务与批改功能矩阵")
+    cols = st.columns(3)
+    modules = [
+        ("📄", "教学大纲生成", "大纲"), ("📅", "教学日历生成", "日历"), ("📋", "培养方案生成", "方案"),
+        ("📝", "智能批卷系统", "批卷"), ("📈", "成绩分析报告", "分析"), ("⚙️", "系统设置", "设置")
     ]
-    
-    # 基本信息表格
-    table = doc.add_table(rows=len(data_rows) + 1, cols=2)
-    table.style = 'Table Grid'
-    
-    # 表头
-    cells = table.rows[0].cells
-    cells[0].text = '项目'
-    cells[1].text = '内容'  
-    
-    for i, (item, value) in enumerate(data_rows, 1):
-        cells = table.rows[i].cells
-        cells[0].text = item
-        cells[1].text = value
-    
-    # 教学日历表格
-    doc.add_heading('二、教学日历', level=1)
-    
-    calendar_table = doc.add_table(rows=2, cols=7)
-    calendar_table.style = 'Table Grid'
-    
-    # 表头
-    headers = ['周次', '课次', '教学内容', '学习重点', '学时', '教学方法', '支撑目标']
-    header_cells = calendar_table.rows[0].cells
-    
-    for i, header in enumerate(headers):
-        header_cells[i].text = header
-    
-    # 示例数据行（使用循环标签）
-    data_cells = calendar_table.rows[1].cells
-    data_cells[0].text = '{{ week_num }}'
-    data_cells[1].text = '{{ session_num }}'
-    data_cells[2].text = '{{ teaching_content }}'
-    data_cells[3].text = '{{ learning_focus }}'
-    data_cells[4].text = '{{ hours }}'
-    data_cells[5].text = '{{ teaching_method }}'
-    data_cells[6].text = '{{ objective }}'
-    
-    # 说明文字
-    doc.add_paragraph('\n说明：')
-    doc.add_paragraph('1. 表格中的 {{标签}} 将在填充时被替换为实际内容')
-    doc.add_paragraph('2. 如需多行数据，请在Word中复制表格行')
-    doc.add_paragraph('3. 标签命名建议使用英文和下划线，如：{{teacher_name}}')
-    
-    # 保存到内存
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
-    
-    return output.getvalue()
+    for i, (icon, title, link) in enumerate(modules):
+        with cols[i % 3]:
+            st.markdown(f'<div style="border:1px solid #ddd;padding:20px;border-radius:10px;text-align:center;"><span style="font-size:40px;">{icon}</span><h4>{title}</h4></div>', unsafe_allow_html=True)
+            if st.button(f"进入{title}", key=f"nav_{i}", use_container_width=True):
+                st.query_params["page"] = link
+                st.rerun()
 
-# 添加跟踪backtrace
-import traceback
+def page_syllabus():
+    nav_bar(show_back=True)
+    st.subheader("📄 深度智造：教学大纲 (支持上传教材分析)")
+    
+    # 5.1 上传辅助资料区域
+    with st.expander("##### 📚 第一步：上传参考资料 (教材/培养方案/参考文献)", expanded=True):
+        col_u1, col_u2 = st.columns(2)
+        book_file = col_u1.file_uploader("上传教材/参考书 PDF/Word", type=["pdf", "docx"])
+        plan_file = col_u2.file_uploader("上传人才培养方案 PDF/Word", type=["pdf", "docx"])
+        
+    # 5.2 手工填写基本信息
+    with st.form("syllabus_form"):
+        st.markdown("##### 📚 第二步：填写关键参数")        
+        # 第一排：基础课程信息 
+        c1, c2, c3 = st.columns(3)
+        name = c1.text_input("课程名称", value="数值模拟在材料成型中的应用")
+        major = c2.text_input("适用专业", value="材料成型及控制工程（焊接方向）")
+        course_type = c3.selectbox("课程性质", ["必修", "限选", "选修"], index=1)
 
-# 在Streamlit应用中调用
-if __name__ == "__main__":
-    st.set_page_config(page_title="Word文档标签化工具", layout="wide")
-    page_calendar_template_maker()
+        # 第二排：学分学时与考核 
+        c4, c5, c6 = st.columns(3)
+        hours = c4.number_input("总学时", value=32)
+        credits = c5.number_input("总学分", value=2.0, step=0.5)
+        assessment = c6.selectbox("考核方式", ["考试", "考查"], index=1)
+
+        # 第三排：学期与要求 
+        c7, c8 = st.columns(2)
+        semester = c7.selectbox("开课学期", ["一", "二", "三", "四", "五", "六", "七", "八"], index=4)
+        prerequisites = c8.text_area("先修课程要求", value="高等数学、工程力学，具备基本微积分和工程力学知识", height=68)
+
+        # 核心目标与思政
+        obj = st.text_area("培养目标", placeholder="输入课程培养目标...", value="课程目标1：能够了解材料成型的数值模拟软件的原理和方法，并理解其局限性；\n课程目标2：能够选用合适的专业数值模拟软件分析材料成型工程中的复杂问题；\n课程目标3：能够选用适合的数值模拟软件预测材料成型工程问题，并分析其局限性。")
+        ideology = st.text_area("思政融入点", value="国产工业软件发展、两弹一星精神")
+
+        if st.form_submit_button("🚀 结合上传资料生成 OBE 标准大纲"):
+            with st.spinner("正在阅读文档并构思大纲..."):
+                #book_ctx = extract_text_from_file(book_file) if book_file else "未提供教材"
+                plan_ctx = extract_text_from_file(plan_file) if plan_file else "未提供培养方案"   
+                book_ctx = safe_extract_text(book_file) if book_file else "未提供教材"
+                #plan_ctx = safe_extract_text(plan_file) if plan_file else "未提供培养方案"
+                
+                prompt = f"""
+                        你是一位资深的高校工程教育认证专家。请为《{name}》课程撰写一份高质量教学大纲。文字专业且符合OBE理念。
+                        
+                        **严格排版要求：**
+                        1. 禁止使用任何 HTML 标签（如 <br/>, <b> 等）。
+                        2. 所有的表格必须使用标准 Markdown 格式：| 列1 | 列2 |。
+                        3. 必须包含分隔线：| :--- | :--- |。
+                        4. 每个表格上方和下方必须各留一行空行。
+                        
+                        **背景资料（请务必参考以下内容）：**
+                        1. 教材/内容核心：{book_ctx[:12000]} (注：由于长度限制，已截取前1万字符)
+                        2. 专业培养要求：{plan_ctx[:10000]}
+                        
+                        **手工填写的参数：**                    
+                        - 课程性质：{course_type} | 考核方式：{assessment} | 学分：{credits} | 学时：{hours}
+                        - 适用专业：{major} | 思政：{ideology} | 开课学期{semester} | 先修课程及其要求{prerequisites}                   
+                        - 课程目标支撑毕业要求表（含课程目标{obj}
+                        
+                        **大纲必须包含：**
+                        - 课程基本信息表，包含大纲名称、课程名称{name}、英文名称、编码、课程性质{course_type}、适用专业{major}、考核方式{assessment}、总学分{credits}、总 学 时{hours}（理论学时X、实验学时X、实训学时X、其他（讨论）	学时X）、开课学期{semester}、先修课程及其要求{prerequisites}等
+                        - 课程简介（理实结合，不少于200字）
+                        - 建议教材	 
+                        - 参考资料	 
+                        - 教学条件
+                        - 课程目标支撑毕业要求表（含课程目标{obj}、支撑指标点如4.1/5.1及支撑强度H/M/L）
+                        - 德育目标
+                        - 教学内容学时分配表（确保总学时为{hours}）（教学内容参考教材和参考材料{book_ctx}，包含序号、教学内容、学生学习预期成果、计划学时、支撑目标、教学方式、其它（作业、习题、实验等）
+                        - 课程目标考核
+                        - 课程目标达成情况评价
+                        - 考核评价表（包含平时成绩与期末考试占比）                    
+                        - 课程考核，包含标准考试评分标准、作业评分标准
+                        - 大作业评分标准，包含作业内容、评价标准（90-100分	70-89 分	60-69分	0-59分）、所占比重
+                        - 课程思政实施方案（结合：{ideology}），包含思政内容切入点、典型案例、教育载体及方法、预期达到的目标、	体现的价值观或思政元素
+                        
+                        **尤其注意构建《课程目标支撑毕业要求表》时：**
+                        请基于培养方案{plan_ctx}严格以下对应关系生成表格，禁止随意发挥：
+                        1. 课程目标1：{obj.split('课程目标2')[0] if '课程目标2' in obj else obj} 
+                           --> 必须支撑：5.1 (工具使用)。
+                        2. 课程目标2：... (以此类推，请解析用户输入的 {obj})
+
+                        **表格格式要求：**
+                        | 课程目标 | 支撑毕业要求及指标点 | 支撑强度 (H/M/L) |
+                        | :--- | :--- | :--- |
+                        | 课程目标1：[简述目标内容] | 5.1 了解常用现代仪器... | H |
+                        | 课程目标2：[简述目标内容] | 5.2 能够选择与使用恰当仪器... | M |
+
+                        **特别注意：**
+                        - 每一行只能对应一个课程目标。
+                        - 每一个课程目标只能对应一个毕业要求及指标点
+                        - 指标点描述必须完整。
+                        - 支撑强度必须根据该目标对指标点的支撑力度给出唯一的 H、M 或 L。                        
+                        """            
+                # 执行生成并存入缓存
+                st.session_state.gen_content["syllabus"] = ai_generate(prompt, engine_id, selected_model)
+                st.session_state['course_name'] = name
+                st.session_state['total_hours'] = hours
+                st.session_state['major'] = major # 适用专业
+                st.session_state['assessment_method'] = assessment # 考核方式
+                st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
+                st.session_state['ideology_points'] = ideology # 存储思政点，以便日历中安排思政课次                
+
+                st.success("✅ 大纲生成成功！")
+
+    if st.session_state.gen_content["syllabus"]:
+        st.markdown("---")
+        st.container(border=True).markdown(st.session_state.gen_content["syllabus"])
+        col1, col2 = st.columns(2)
+        col1.download_button("💾 下载 Word 版大纲", create_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
+        col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
+
+def page_calendar():
+    nav_bar(show_back=True)
+    st.subheader("📅 智能生成教学日历 (支持模版参考)")
+    
+    # 1. 基础参数获取与缺省值设定
+    col_u1, col_u2, col_u3 = st.columns(3)
+    name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
+    
+    try:
+        default_hours = int(st.session_state.get('total_hours', 32))
+    except:
+        default_hours = 32
+        
+    total_hours = col_u2.number_input("总学时", value=default_hours)
+    total_weeks = col_u3.number_input("总周数", value=16)  
+    
+    # 2. 核心：文件上传（增加模版位）
+    col_u4, col_u5, col_u6 = st.columns(3)
+    syllabus_file = col_u4.file_uploader("上传教学大纲 (新上传文件将优先于系统生成记录)", type=['pdf', 'docx'])
+    plan_file = col_u5.file_uploader("上传人才培养方案/指标点", type=["pdf", "docx"])
+    template_file = col_u6.file_uploader("上传教学日历范本 (可选模版)", type=["pdf", "docx"])
+
+    if st.button("🚀 依据模版与大纲生成"):
+        with st.spinner("正在学习模版并对齐大纲..."):
+            # --- 逻辑优先级判断 ---
+            source_info = ""            
+            if syllabus_file:
+                # 优先级 1：新上传的大纲
+                syl_ctx = safe_extract_text(syllabus_file)
+                source_info = "使用新上传的大纲"
+            elif st.session_state.get("generated_syllabus"):
+                syl_ctx = st.session_state.generated_syllabus
+                source_info = "使用系统生成的大纲记录"
+            else:
+                # 优先级 2：本系统之前生成的缓存
+                syl_ctx = "未提供详细大纲，请根据通用教学逻辑及课程名生成。"
+                source_info = "无大纲参考，基于通用逻辑"
+
+            plan_ctx = safe_extract_text(plan_file) if plan_file else "按常规工程教育认证标准。"
+            # 提取模版内容
+            template_ctx = safe_extract_text(template_file) if template_file else "未提供模版，请自行设计格式。"
+
+            # 3. 增强版 Prompt：引入模版学习逻辑
+            final_prompt = f"""
+            你是一位资深教学专家。请基于以下提供的【教学大纲】内容，严格按照【教学日历范本】的排版格式，为《{name}》课程定制一份正式的【教学日历】。
+
+            **🚨 核心禁令：**
+            1. 禁止输出任何开场白、前言、自我介绍、温馨提示或“好的”、“作为专家”等废话。
+            2. 严禁解释生成逻辑或说明参考了哪些文件。
+            3. 必须直接以“# 《{name}》教学日历”作为第一行内容。
+            4. 严禁在正文中提示“大纲未包含内容”，若缺少信息请根据专业常识推导补全。
+
+            **参考资料：**
+            - 教学日历范本（必须严格仿照其每一项）：{template_ctx[:4000]}
+            - 教学大纲（核心内容来源）：{syl_ctx[:8000]}
+            - 课时要求：总{total_hours}学时，{total_weeks}周。
+
+            **生成任务要求（务必对齐）：**
+            1. **基本信息提取**：从大纲中提取并填入日历：英文名称、课程编码、课程性质、总学分、学时分配、适用专业、选用教材及参考书目、考核方式（含成绩计算方法及比例）。
+            2. **结构复刻**：教学日历模版{template_ctx}中出现的所有项（如：封面信息、系主任签字位、表格等）必须保留。范本中没有的项严禁出现。
+            3. **逻辑对齐**：日历进度表的主题顺序、学时分配必须严格遵循大纲{syl_ctx}中的教学章节。
+            4. **目标支撑（重点）**：日历进度表中的“支撑课程目标”列，必须使用大纲中定义的编号（如：CO1, CO2, CO3 或 目标1, 2, 3）。
+            5. **格式规范**：禁止使用 HTML 标签。表格使用 Markdown 格式，前后各留一行空行。
+            6.教学日历模版{template_ctx}的主表中的这些列都要有：周次	课次	教学内容（写明章节标题）	学习重点、教学要求	学时	教学方法	其它（作业、习题课、实验等）	支撑教学目标
+            """
+
+            # 执行生成
+            # 注意：engine_id 和 selected_model 需在全局或侧边栏已定义
+            res = ai_generate(final_prompt, engine_id, selected_model)
+            
+            # 清洗可能存在的 AI 头部废话（双重保险）
+            if "周次" in res and not res.strip().startswith("#"):
+                start_idx = res.find("#")
+                if start_idx != -1:
+                    res = res[start_idx:]
+            
+            # 统一存储路径至 generated_calendar
+            st.session_state.generated_calendar = res
+            st.success(f"✅ 生成成功（来源：{source_info}）")
+            st.rerun() 
+
+    # 4. 显示与下载逻辑
+    # 使用 get 方法安全读取，避免 KeyError
+    calendar_content = st.session_state.get("generated_calendar")
+    
+    if calendar_content:
+        st.markdown("---")
+        # 使用容器展示结果
+        with st.container(border=True):
+            st.markdown("### 生成的教学日历预览")
+            st.markdown(calendar_content)
+        
+        # 安全下载逻辑
+        if isinstance(calendar_content, str) and len(calendar_content) > 0:
+            try:
+                doc_file = create_docx(calendar_content)
+                st.download_button(
+                    label="💾 下载 Word 版日历",
+                    data=doc_file,
+                    file_name=f"{name}_教学日历.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            except Exception as e:
+                st.error(f"导出 Word 失败: {e}")    
+  
+def page_program():
+    nav_bar(show_back=True)
+    st.subheader("📋 专业人才培养方案生成")
+    with st.form("program_form"):
+        major = st.text_input("专业名称", value="材料成型及控制工程")
+        pos = st.text_area("专业特色", value="服务石油化工行业，聚焦焊接成型与无损检测")
+        if st.form_submit_button("生成人才培养方案"):
+            prompt = f"撰写{major}专业2024级培养方案。含培养目标、12项毕业要求、特色定位({pos})、核心课程。专业严谨。"
+            with st.spinner("正在构建方案..."):
+                st.session_state.generated_program = ai_generate(prompt, engine_id, selected_model)
+
+    if st.session_state.generated_program:
+        st.markdown("---")
+        st.container(border=True).markdown(st.session_state.gen_content["program"])
+        st.download_button("💾 下载 Word 版培养方案", create_docx(st.session_state.gen_content["program"]), file_name="培养方案.docx")
+
+def page_grading():
+    nav_bar(show_back=True)
+    st.subheader("📝 智能试卷批阅与评价")
+    c1, c2 = st.columns(2)
+    with c1:
+        q_file = st.file_uploader("1. 上传试题 (PDF/Word)", type=["pdf", "docx"], key="q")
+        q_txt = extract_text_from_file(q_file) if q_file else ""
+    with c2:
+        s_file = st.file_uploader("2. 上传标准答案 (PDF/Word)", type=["pdf", "docx"], key="s")
+        s_txt = extract_text_from_file(s_file) if s_file else ""
+
+    st.divider()
+    papers = st.file_uploader("3. 批量上传学生卷纸 (图片/PDF)", type=["jpg", "png", "pdf"], accept_multiple_files=True)
+
+    for idx, paper in enumerate(papers or []):
+        with st.container(border=True):
+            st.write(f"**学生 {idx+1}:** {paper.name}")
+            s_name = st.text_input("姓名", value=f"学生_{idx+1}", key=f"sn_{idx}")
+            
+            ocr_text = ""
+            if paper.type == "application/pdf":
+                imgs = render_pdf_images(paper)
+                for i, img in enumerate(imgs):
+                    st.image(img, width=350)
+                    with st.expander("🔍 查看高清大图"): st.image(img, use_container_width=True)
+                    with st.spinner("识别中..."): ocr_text += ai_ocr(img, engine_id, selected_model) + "\n"
+            else:
+                img_data = paper.read()
+                st.image(img_data, width=350)
+                with st.expander("🔍 查看高清大图"): st.image(img_data, use_container_width=True)
+                with st.spinner("识别中..."): ocr_text = ai_ocr(img_data, engine_id, selected_model)
+            
+            final_ans = st.text_area("识别结果校对", value=ocr_text, key=f"ocr_{idx}", height=150)
+            
+            if st.button(f"🚀 {engine_id} 自动批改", key=f"go_{idx}"):
+                with st.spinner("正在评分..."):
+                    p = f"题目：{q_txt}\n答案：{s_txt}\n学生：{final_ans}\n请评分(满分100)并给出批注。格式：\n分数：[数字]\n批注：[解析]"
+                    res = ai_generate(p, engine_id, selected_model)
+                    st.markdown(res)
+                    score = int(re.search(r"分数[：:]\s*(\d+)", res).group(1)) if re.search(r"分数[：:]\s*(\d+)", res) else 0
+                    st.session_state.score_records.append({"学生": s_name, "分数": score, "评价": res})
+
+def page_analysis():
+    nav_bar(show_back=True)
+    st.subheader("📈 成绩与分析报告")
+    if not st.session_state.score_records:
+        st.warning("当前无批改记录")
+        return
+    st.dataframe(st.session_state.score_records, use_container_width=True)
+    scores = [r["分数"] for r in st.session_state.score_records]
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("平均分", f"{np.mean(scores):.1f}")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.hist(scores, bins=range(0, 110, 10), color='#4F8BF9', edgecolor='white')
+        st.pyplot(fig)
+    with col2:
+        st.download_button("导出成绩记录 (CSV)", str(st.session_state.score_records), "scores.csv")
+
+# --- 7. 路由逻辑 ---
+route = {
+    "首页": page_home, "大纲": page_syllabus, "日历": page_calendar, 
+    "方案": page_program, "批卷": page_grading, "分析": page_analysis
+}
+current = st.query_params.get("page", "首页")
+route.get(current, page_home)()
