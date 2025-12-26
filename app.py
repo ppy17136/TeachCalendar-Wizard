@@ -511,16 +511,7 @@ def create_blank_template():
     
     # 基本信息
     doc.add_heading('一、课程基本信息', level=1)
-    
-    # 基本信息表格
-    table = doc.add_table(rows=6, cols=2)
-    table.style = 'Table Grid'
-    
-    # 表头
-    cells = table.rows[0].cells
-    cells[0].text = '项目'
-    cells[1].text = '内容'
-    
+
     # 数据行
     data_rows = [
         ('课程名称', '{{course_name}}'),
@@ -530,6 +521,15 @@ def create_blank_template():
         ('学分数', '{{credits}}'),
         ('开课学期', '{{semester}}')
     ]
+    
+    # 基本信息表格
+    table = doc.add_table(rows=len(data_rows) + 1, cols=2)
+    table.style = 'Table Grid'
+    
+    # 表头
+    cells = table.rows[0].cells
+    cells[0].text = '项目'
+    cells[1].text = '内容'  
     
     for i, (item, value) in enumerate(data_rows, 1):
         cells = table.rows[i].cells
@@ -545,6 +545,7 @@ def create_blank_template():
     # 表头
     headers = ['周次', '课次', '教学内容', '学习重点', '学时', '教学方法', '支撑目标']
     header_cells = calendar_table.rows[0].cells
+    
     for i, header in enumerate(headers):
         header_cells[i].text = header
     
