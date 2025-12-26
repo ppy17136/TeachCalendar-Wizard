@@ -434,7 +434,118 @@ def page_calendar():
                 )
             except Exception as e:
                 st.error(f"导出 Word 失败: {e}")    
-  
+def read_local_docx(file_path):
+    """读取本地预设的 docx 模版文件"""
+    if not os.path.exists(file_path):
+        return f"错误：模版文件 {file_path} 不存在。"
+    try:
+        doc = Document(file_path)
+        return "\n".join([p.text for p in doc.paragraphs])
+    except Exception as e:
+        return f"本地模版解析失败: {str(e)}"
+
+def page_calendar():
+    nav_bar(show_back=True)
+    st.subheader("📅 智能生成教学日历 (支持多模版切换)")
+    
+    # 1. 基础参数设置
+    col_u1, col_u2, col_u3 = st.columns(3)
+    name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "智能化焊接生产与工程管理"))
+    
+    try:
+        default_hours = int(st.session_state.get('total_hours', 24))
+    except:
+        default_hours = 24
+        
+    total_hours = col_u2.number_input("总学时", value=default_hours)
+    total_weeks = col_u3.number_input("总周数", value=10)  
+    
+    # 2. 模版选择逻辑 
+    st.divider()
+    t_col1, t_col2 = st.columns([1, 2])
+    
+    with t_col1:
+        template_choice = st.selectbox(
+            "选择教学日历模版", 
+            ["通用模版", "辽宁石油化工大学模版", "上传自定义模版"],
+            help="选择系统预设模版或上传您自己的模版文件"
+        )
+    
+    template_ctx = ""
+    if template_choice == "上传自定义模版":
+        template_file = st.file_uploader("上传自定义 .docx 模版", type=["docx"])
+        if template_file:
+            template_ctx = safe_extract_text(template_file)
+    elif template_choice == "通用模版":
+        # 对应上传的文件：教学日历_通用模版.docx [cite: 25]
+        template_ctx = read_local_docx("教学日历_通用模版.docx")
+    else:
+        # 对应上传的文件：教学日历_辽宁石油化工大学模版.docx [cite: 15]
+        template_ctx = read_local_docx("教学日历_辽宁石油化工大学模版.docx")
+
+    # 3. 资料上传
+    st.markdown("##### 📚 关联教学大纲与培养方案")
+    col_u4, col_u5 = st.columns(2)
+    syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'])
+    plan_file = col_u5.file_uploader("上传人才培养方案 (可选)", type=["pdf", "docx"])
+
+    if st.button("🚀 依据所选模版生成教学日历"):
+        if not template_ctx:
+            st.error("请先确保模版内容已载入（选择预设或完成上传）。")
+            return
+
+        with st.spinner(f"正在使用【{template_choice}】并对齐大纲..."):
+            # --- 资料优先级判断 ---
+            syl_ctx = ""
+            if syllabus_file:
+                syl_ctx = safe_extract_text(syllabus_file)
+            elif st.session_state.get("generated_syllabus"):
+                syl_ctx = st.session_state.generated_syllabus
+            else:
+                syl_ctx = "未提供详细大纲，请根据通用教学逻辑补全内容。"
+
+            plan_ctx = safe_extract_text(plan_file) if plan_file else "按常规工程教育认证标准。"
+
+            # 4. Prompt 构建
+            final_prompt = f"""
+            你是一位资深教学专家。请基于以下提供的【教学大纲】内容，严格按照【教学日历范本】的排版格式和变量标签，为《{name}》课程定制一份正式的【教学日历】。
+
+            **🚨 核心禁令：**
+            1. 禁止输出任何开场白或解释性文字。必须直接输出 Markdown 格式内容。
+            2. 必须保留模版中所有的变量占位符样式（如 {{{{ course_name }}}}, {{{{ teacher_name }}}}, {{{{ s.week }}}} 等）以便系统后续处理，或者直接填充数据。
+            3. 严禁改变模版表格的列结构 [cite: 17, 21]。
+
+            **参考资料：**
+            - 选定的模版格式：{template_ctx[:4000]} 
+            - 教学大纲核心内容：{syl_ctx[:8000]}
+            - 核心参数：总学时 {total_hours}，总周数 {total_weeks}。
+
+            **生成要求：**
+            1. **结构复刻**：模版中出现的【基本信息表】[cite: 17, 28]、【学时分配表】[cite: 18, 29]、【教材考核表】[cite: 20, 31]、【教学进度主表】[cite: 21, 32] 必须全部体现。
+            2. **进度安排**：主表中“周次”、“课次”、“教学内容”、“重点要求”、“支撑目标”等必须与大纲严格对应 [cite: 21]。
+            3. **签字位保留**：保留主讲教师、审批意见、系主任和院长签字的占位区域 [cite: 22, 24, 33, 35]。
+            """
+
+            res = ai_generate(final_prompt, engine_id, selected_model)
+            st.session_state.generated_calendar = res
+            st.success(f"✅ 已根据【{template_choice}】生成日历")
+            st.rerun()
+
+    # 4. 展示与下载
+    calendar_content = st.session_state.get("generated_calendar")
+    if calendar_content:
+        st.markdown("---")
+        with st.container(border=True):
+            st.markdown(calendar_content)
+        
+        doc_file = create_docx(calendar_content)
+        st.download_button(
+            label="💾 下载 Word 版日历",
+            data=doc_file,
+            file_name=f"{name}_教学日历.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
 def page_program():
     nav_bar(show_back=True)
     st.subheader("📋 专业人才培养方案生成")
