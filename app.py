@@ -380,7 +380,7 @@ def page_calendar():
     
     # --- 1. 基础参数与状态同步 ---
     col_u1, col_u2, col_u3 = st.columns(3)
-    name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
+    course_name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
     try:
         default_hours = int(st.session_state.get('total_hours', 24))
