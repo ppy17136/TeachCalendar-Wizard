@@ -437,29 +437,58 @@ def page_calendar():
 
             # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
-            你是一个教学数据处理专家。请阅读【教学大纲】，将其内容转化为一个 JSON 字典。
-            这个字典的键名（Key）必须严格匹配以下【模版标签】{template_desc}。
+            # 角色
+            你是一位资深高校教务专家，精通 OBE（成果导向教育）理念与教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其完美填充到【教学日历模板{template_desc}】的标签体系中。
+
+            # 核心任务
+            请阅读提供的【教学大纲{syl_ctx}】文本，提取关键信息并撰写缺失内容，最终输出一个纯 JSON 字典。该字典的键名（Key）必须与模板中的 {{ 标签 }} 严格一一对应。
+
+            # 标签映射指南（Key 列表）
+            1. 基础信息：
+               - academic_year, semester, course_name, class_info, teacher_name, teacher_title
+               - total_hours, term_hours, total_weeks, weekly_hours, course_nature
+            2. 教材与考核：
+               - textbook_name, publisher, publish_date, textbook_remark, assessment_method, grading_formula
+            3. 签字与备注：
+               - sign_date_1, sign_date_2, sign_date_3, note_1, note_2, note_3
+            4. 教学进度主表（核心：必须为名为 "schedule" 的列表对象）：
+               - 每个对象包含：week, sess, content, req, hrs, method, obj（分别对应周次，课次，教学内容
+(写明章节标题)，学习重点、教学要求，学时，教学方法，其它
+(作业等)，支撑教学目标）
+
+
+            # 撰写逻辑约束
+            - **学时逻辑**：确保 schedule 列表中所有课次的 hours 之和严格等于 {total_hours}。
+            - **能动性撰写**：如果大纲中未明确某课次的“学习重点”或“支撑目标”，请基于该章节的学术规范，撰写专业、具体的内容。
+            - **思政融入**：请在教学内容或重点中随机嵌入 2-3 处思政元素（如：工程伦理、工匠精神、国产软件自主化等）。
+            - **格式要求**：严禁输出 Markdown 代码块标记（如 ```json ），直接输出以 { 开头的纯 JSON 字符串。
+
+            # 参考资料
+            - 教学大纲全文：{syl_ctx[:8000]}
+            - 课程名称：{{ course_name }}
+            - 总学时/周数：{total_hours} / {total_weeks}
+                        
 
             **必须提取并填充的标签清单：**
             - schedule: 这是一个列表，包含每一课次的内容: {{week}}	{{sess}} {{content}} {{req}} {{hrs}} {{method}}	{{other}} {{obj}}
             - 进度表数据必须放在键名为 "schedule" 的数组中。
-            课程名称	{{ course_name }}
-            学生专业及年级	{{ class_info }}
-            主讲教师姓名	{{ teacher_name }}   职称{{ teacher_title }}
-            课程总学时数	{{ total_hours }}	
-            本学期总学时数	{{ term_hours }}	
-            讲课学时	{{ lecture_hours }}
-            本学期上课周数	{{ total_weeks }}	
-            实验学时	{{ lab_hours }}
-            平均每周学时数	{{ weekly_hours }}	
-            测验学时	{{ quiz_hours }}
-            课程性质	{{ course_nature }}	
-            课外学时	{{ extra_hours }}
-            学校名称{{ school_name }}
-            使用教材名称{{ textbook_name }}	出版社	{{ publisher }}	出版时间{{ publish_date }}	获奖情况{{ textbook_remark }}
-            参考书目references
-            考核方式	{{ assessment_method }}	
-            成绩计算方法	{{ grading_formula }}
+            课程名称：	{{ course_name }}
+            学生专业及年级：	{{ class_info }}
+            主讲教师姓名：	{{ teacher_name }}   职称：{{ teacher_title }}
+            课程总学时数：	{{ total_hours }}	
+            本学期总学时数：	{{ term_hours }}	
+            讲课学时：	{{ lecture_hours }}
+            本学期上课周数：	{{ total_weeks }}	
+            实验学时：	{{ lab_hours }}
+            平均每周学时数：	{{ weekly_hours }}	
+            测验学时：	{{ quiz_hours }}
+            课程性质：	{{ course_nature }}	
+            课外学时：	{{ extra_hours }}
+            学校名称：{{ school_name }}
+            使用教材名称：{{ textbook_name }}	出版社：	{{ publisher }}	出版时间：{{ publish_date }}	获奖情况：{{ textbook_remark }}
+            参考书目：references
+            考核方式：	{{ assessment_method }}	
+            成绩计算方法：	{{ grading_formula }}
 
 
             **约束条件：**
