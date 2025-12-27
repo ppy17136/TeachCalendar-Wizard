@@ -14,8 +14,8 @@ import base64
 import io
 from PIL import Image
 import google.generativeai as genai
-
-
+import json
+from docxtpl import DocxTemplate  # 必须安装 docxtpl
 
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
@@ -92,8 +92,6 @@ def create_docx(text):
     bio = io.BytesIO()
     doc.save(bio)
     return bio.getvalue()
-
-
 
 def ai_generate(prompt, provider, model_name):
     """统一文本生成接口"""
@@ -330,13 +328,7 @@ def page_syllabus():
         col1.download_button("💾 下载 Word 版大纲", create_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
         col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
 
-import os
-import io
-import json
-import re
-import streamlit as st
-from docx import Document
-from docxtpl import DocxTemplate  # 必须安装 docxtpl
+
 
 # ==================== 1. 核心渲染与辅助函数 ====================
 
@@ -349,9 +341,6 @@ def read_local_docx_structure(file_path):
         return "\n".join([p.text for p in doc.paragraphs if "{{" in p.text])
     except:
         return "模版读取失败"
-
-
-
 
 def render_calendar_docx(template_path, json_str):
     try:
@@ -449,10 +438,10 @@ def page_calendar():
             # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
             你是一个教学数据处理专家。请阅读【教学大纲】，将其内容转化为一个 JSON 字典。
-            这个字典的键名（Key）必须严格匹配以下【模版标签】。
+            这个字典的键名（Key）必须严格匹配以下【模版标签】{template_desc}。
 
             **必须提取并填充的标签清单：**
-            - schedule: 这是一个列表，包含每一课次的内容: {{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}
+            - schedule: 这是一个列表，包含每一课次的内容: {{week}}	{{sess}}	{{content}}	{{req}}	{{hrs}}	{{method}}	{{other}}	{{obj}}
             - 进度表数据必须放在键名为 "schedule" 的数组中。
 
             **约束条件：**
