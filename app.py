@@ -330,7 +330,6 @@ def page_syllabus():
         col1.download_button("💾 下载 Word 版大纲", create_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
         col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
 
-
 import os
 import io
 import json
@@ -352,201 +351,29 @@ def read_local_docx_structure(file_path):
         return "模版读取失败"
 
 def render_calendar_docx(template_path, json_str):
+    """
+    真正的填充逻辑：复制模版 -> 注入数据 -> 输出二进制流
+    """
     try:
+        # 1. 清洗 AI 可能输出的 Markdown 代码块标记
         clean_json = re.sub(r'```json\s*|\s*```', '', json_str).strip()
         data = json.loads(clean_json)
         
-        # --- 新增：确保 schedule 键存在，防止 's' is undefined 报错 ---
-        if "schedule" not in data:
-            data["schedule"] = [] 
-            
+        # 2. 加载模版 (支持路径或文件流)
         doc = DocxTemplate(template_path)
+        
+        # 3. 渲染数据 (数据字典键值需与模版 {{标签}} 一一对应)
         doc.render(data)
         
+        # 4. 保存到内存流
         target_stream = io.BytesIO()
         doc.save(target_stream)
         return target_stream.getvalue()
     except Exception as e:
         st.error(f"模版填充失败: {str(e)}")
         return None
-def clean_none(obj):
-    if isinstance(obj, dict):
-        return {k: clean_none(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_none(x) for x in obj]
-    return "" if obj is None else obj
-<<<<<<< HEAD
 
-
-from docx import Document
-from docx.shared import Inches, Pt
-import zipfile
-import tempfile
-import os
-
-def create_fixed_template_from_xml():
-    """从正确的 XML 创建模板文件"""
-    # 使用你提供的正确 XML
-    correct_xml = '''<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
-<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mo="http://schemas.microsoft.com/office/mac/office/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14"><w:body><w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>教学日历</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>一、课程基本信息</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:type="auto" w:w="0"/><w:tblLook w:firstColumn="1" w:firstRow="1" w:lastColumn="0" w:lastRow="0" w:noHBand="0" w:noVBand="1" w:val="04A0"/></w:tblPr><w:tblGrid><w:gridCol w:w="4320"/><w:gridCol w:w="4320"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>内容</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>课程名称</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{course_name}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>英文名称</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{english_name}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>课程编码</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{course_code}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>总学时</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{total_hours}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>学分数</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{credits}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>开课学期</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{semester}}</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>二、教学日历</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:type="auto" w:w="0"/><w:tblLook w:firstColumn="1" w:firstRow="1" w:lastColumn="0" w:lastRow="0" w:noHBand="0" w:noVBand="1" w:val="04A0"/></w:tblPr><w:tblGrid><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>周次</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>课次</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>教学内容</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>学习重点</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>学时</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>教学方法</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>支撑目标</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{% for s in schedule %}{{ s.week_num }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.session_num }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.teaching_content }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.learning_focus }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.hours }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.teaching_method }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.objective }}{% endfor %}</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>说明：</w:t></w:r></w:p><w:p><w:r><w:t>1. 表格中的 {{标签}} 将在填充时被替换为实际内容</w:t></w:r></w:p><w:p><w:r><w:t>2. 如需多行数据，请在Word中复制表格行</w:t></w:r></w:p><w:p><w:r><w:t>3. 标签命名建议使用英文和下划线，如：{{teacher_name}}</w:t></w:r></w:p><w:sectPr w:rsidR="00FC693F" w:rsidRPr="0006063C" w:rsidSect="00034616"><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>'''
-    
-    # 创建临时目录
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        # 创建基本目录结构
-        word_dir = os.path.join(tmp_dir, "word")
-        rels_dir = os.path.join(word_dir, "_rels")
-        os.makedirs(rels_dir, exist_ok=True)
-        
-        # 保存 document.xml
-        xml_path = os.path.join(word_dir, "document.xml")
-        with open(xml_path, "w", encoding="utf-8") as f:
-            f.write(correct_xml)
-        
-        # 创建简单的 _rels 文件
-        rels_content = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>'''
-        
-        rels_path = os.path.join(rels_dir, "document.xml.rels")
-        with open(rels_path, "w", encoding="utf-8") as f:
-            f.write(rels_content)
-        
-        # 创建简单的 styles.xml
-        styles_content = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<docDefaults><rPrDefault><rPr><rFonts ascii="Times New Roman" eastAsia="宋体" hAnsi="Times New Roman"/><sz w:val="24"/></rPr></rPrDefault></docDefaults>
-<latentStyles count="267" defLockedState="0" defUIPriority="99" defSemiHidden="0" defUnhideWhenUsed="0" defQFormat="0">
-<lsdException locked="0" name="Normal" priority="0" qFormat="1"/>
-<lsdException locked="0" name="Heading1" priority="9" qFormat="1"/>
-<lsdException locked="0" name="Title" priority="10" qFormat="1"/>
-</latentStyles>
-</styleSheet>'''
-        
-        styles_path = os.path.join(word_dir, "styles.xml")
-        with open(styles_path, "w", encoding="utf-8") as f:
-            f.write(styles_content)
-        
-        # 创建 [Content_Types].xml
-        content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>'''
-        
-        content_types_path = os.path.join(tmp_dir, "[Content_Types].xml")
-        with open(content_types_path, "w", encoding="utf-8") as f:
-            f.write(content_types)
-        
-        # 打包为 docx
-        output_path = "template_fixed.docx"
-        with zipfile.ZipFile(output_path, "w") as zipf:
-            for root, dirs, files in os.walk(tmp_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, tmp_dir)
-                    zipf.write(file_path, arcname)
-        
-        print(f"✅ 已创建正确的模板: {output_path}")
-        return output_path
-def render_calendar_docx(template_path, json_str):
-    try:
-        st.info(f"正在渲染模板: {template_path}")
-        
-        # 1) 提取最外层 JSON
-=======
-def render_calendar_docx(template_path, json_str):
-    try:
-        # 1. 深度清洗：只提取最外层 {} 之间的内容，排除所有 Markdown 说明
->>>>>>> parent of e07a703 (d)
-        match = re.search(r'\{.*\}', json_str, re.DOTALL)
-        if not match:
-            return "ERROR: AI 生成的数据格式不正确，未发现 JSON 对象。"
-        
-        # 2. 移除 JSON 字符串中可能破坏 XML 的非法控制字符
-        clean_json = match.group(0)
-        clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
-        
-        data = json.loads(clean_json)
-        data = clean_none(data)
-        # 3. 容错处理：确保进度表列表存在
-        if "schedule" not in data or not isinstance(data["schedule"], list):
-            data["schedule"] = []
-            
-<<<<<<< HEAD
-        # 显示数据预览
-        with st.expander("🔍 查看渲染数据"):
-            st.json(data)
-            st.write(f"schedule 列表长度: {len(data.get('schedule', []))}")
-
-        # 检查模板路径
-        if isinstance(template_path, str):
-            if not os.path.exists(template_path):
-                st.error(f"模板文件不存在: {template_path}")
-                return None
-        else:
-            # template_path 可能是文件流
-            pass
-
-        doc = DocxTemplate(template_path)
-        doc.render(data, autoescape=True)
-
-        buf = io.BytesIO()
-        doc.save(buf)
-        out = buf.getvalue()
-
-        # docx 必须是 zip，开头一般是 PK
-        if not out.startswith(b"PK"):
-            st.error("渲染输出不是合法 docx（zip 头不是 PK）")
-            # 保存错误文件供调试
-            with open("error_output.bin", "wb") as f:
-                f.write(out)
-            return None
-
-        st.success("✅ 模板渲染成功！")
-        return out
-
-    except json.JSONDecodeError as e:
-        st.error(f"JSON 解析错误: {str(e)}")
-        st.error(f"JSON 内容: {json_str[:500]}...")
-        return None
-    except Exception as e:
-        st.error("模板渲染失败，请看下面的报错信息：")
-        st.exception(e)
-        
-        # 尝试保存模板供调试
-        try:
-            if isinstance(template_path, str):
-                with open("debug_template.docx", "wb") as f:
-                    with open(template_path, "rb") as src:
-                        f.write(src.read())
-            st.info("模板已保存为 debug_template.docx 供调试")
-        except:
-            pass
-            
-        return None
-
-
-=======
-        # 4. 执行渲染
-        doc = DocxTemplate(template_path)
-        # 允许不规范字符填充
-        doc.render(data, autoescape=True) 
-        
-        target_stream = io.BytesIO()
-        doc.save(target_stream)
-        return target_stream.getvalue()
-    except json.JSONDecodeError as e:
-        return f"ERROR: JSON 数据解析失败，请检查调试面板。错误详情: {str(e)}"
-    except Exception as e:
-        return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
 # ==================== 2. 教学日历模块页面 ====================
->>>>>>> parent of e07a703 (d)
-
-
-
 
 def page_calendar():
     nav_bar(show_back=True)
@@ -557,59 +384,45 @@ def page_calendar():
     name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
     try:
-        default_hours = int(st.session_state.get('total_hours', 24))
+        default_hours = int(st.session_state.get('total_hours', 32))
     except:
-        default_hours = 24
+        default_hours = 32
         
     total_hours = col_u2.number_input("总学时", value=default_hours)
-    total_weeks = col_u3.number_input("总周数", value=12)  
+    total_weeks = col_u3.number_input("总周数", value=16)  
     
     # --- 2. 模版选择 ---
     st.divider()
     t_col1, t_col2 = st.columns([1, 2])
-    
     with t_col1:
         template_choice = st.selectbox(
             "选择要填充的模版", 
-            ["使用修复后的模板", "辽宁石油化工大学模版", "通用模版", "上传自定义模版"],
-            key="template_choice"
+            ["辽宁石油化工大学模版", "通用模版", "上传自定义模版"]
         )
     
     # 确定物理模版路径
     current_template_path = ""
+    template_desc = ""
     
     if template_choice == "上传自定义模版":
-        custom_file = st.file_uploader("上传您的 .docx 模版", type=["docx"], key="custom_uploader")
+        custom_file = st.file_uploader("上传您的 .docx 模版", type=["docx"])
         if custom_file:
-            # 保存为临时文件
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-                tmp.write(custom_file.getvalue())
-                current_template_path = tmp.name
+            current_template_path = custom_file # docxtpl 可以直接接受文件流
+            template_desc = "自定义模版"
     elif template_choice == "通用模版":
-        if os.path.exists("template_general.docx"):
-            current_template_path = "template_general.docx"
-        else:
-            st.warning("template_general.docx 不存在，将使用修复后的模板")
-            current_template_path = "template_fixed.docx"
-    elif template_choice == "辽宁石油化工大学模版":
-        if os.path.exists("template_lnpu.docx"):
-            current_template_path = "template_lnpu.docx"
-        else:
-            st.warning("template_lnpu.docx 不存在，将使用修复后的模板")
-            current_template_path = "template_fixed.docx"
-    else:  # "使用修复后的模板"
-        # 确保修复后的模板存在
-        if not os.path.exists("template_fixed.docx"):
-            create_fixed_template_from_xml()
-        current_template_path = "template_fixed.docx"
-    
+        current_template_path = "template_general.docx"
+        template_desc = read_local_docx_structure(current_template_path)
+    else:
+        current_template_path = "template_lnpu.docx"
+        template_desc = read_local_docx_structure(current_template_path)
+
     # --- 3. 数据来源关联 ---
     st.markdown("##### 📚 数据提取来源")
     col_u4, col_u5 = st.columns(2)
-    syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'], key="syllabus_uploader")
+    syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'])
     
-    if st.button("🚀 提取大纲数据并填充模版", key="generate_data_btn"):
-        if not current_template_path or not os.path.exists(current_template_path):
+    if st.button("🚀 提取大纲数据并填充模版"):
+        if not current_template_path:
             st.error("请先指定有效的模版文件")
             return
 
@@ -623,97 +436,55 @@ def page_calendar():
             else:
                 syl_ctx = "未提供具体大纲，请按常识生成标准数据。"
 
-            # 关键：要求 AI 输出 JSON 字典
+            # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
             你是一个教学数据处理专家。请阅读【教学大纲】，将其内容转化为一个 JSON 字典。
             这个字典的键名（Key）必须严格匹配以下【模版标签】。
 
             **必须提取并填充的标签清单：**
-            - course_name (填充 {name}), english_name, course_code
-            - total_hours (必须为 {total_hours}), credits, semester
-            - schedule: 这是一个列表，包含每一课次的: week_num, session_num, teaching_content, learning_focus, hours, teaching_method, objective
-            
-            **结构要求：**
-            - 进度表必须是一个名为 "schedule" 的数组。
-            - 数组中的每个对象必须包含键：week_num, session_num, teaching_content, learning_focus, hours, teaching_method, objective。
+            - academic_year (如 2024—2025), semester (如 1)
+            - course_name (填充 {name}), class_info (专业年级)
+            - teacher_name, teacher_title
+            - total_hours (必须为 {total_hours}), term_hours, total_weeks (必须为 {total_weeks}), weekly_hours
+            - textbook_name, publisher, publish_date, textbook_remark
+            - assessment_method, grading_formula, sign_date_1
+            - schedule: 这是一个列表，包含每一课次的: week, sess, content, req, hrs, method, other, obj
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
             2. 确保 JSON 结构合法，不要截断。
             3. 参考大纲内容：{syl_ctx[:8000]}
-            
-            **示例格式：**
-            {{
-              "course_name": "{name}",
-              "english_name": "Numerical Simulation in Material Forming",
-              "course_code": "ME401",
-              "total_hours": {total_hours},
-              "credits": 2.0,
-              "semester": "第7学期",
-              "schedule": [
-                {{
-                  "week_num": "1",
-                  "session_num": "1",
-                  "teaching_content": "课程介绍与数值模拟概述",
-                  "learning_focus": "了解课程目标与数值模拟基本概念",
-                  "hours": "2",
-                  "teaching_method": "讲授+讨论",
-                  "objective": "课程目标1"
-                }}
-              ]
-            }}
             """
-            
+
             # 调用 AI 引擎提取 JSON
             json_res = ai_generate(final_prompt, engine_id, selected_model)
             
-            # 将生成的 JSON 和模版路径存入缓存
+            # 将生成的 JSON 和模版路径存入缓存，供下载调用
             st.session_state.generated_json_data = json_res
             st.session_state.active_template_path = current_template_path
             
-            st.success("✅ 数据提取完成！")
+            st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")
 
     # --- 4. 预览与下载 ---
     if st.session_state.get("generated_json_data"):
-        with st.expander("🔍 查看 AI 提取的填充数据（JSON 格式）", expanded=True):
+        with st.expander("🔍 查看 AI 提取的填充数据"):
             st.code(st.session_state.generated_json_data, language="json")
         
-<<<<<<< HEAD
-        # 执行填充
-        with st.spinner("正在渲染模板..."):
-            filled_docx = render_calendar_docx(
-                st.session_state.active_template_path, 
-                st.session_state.generated_json_data
-            )
-=======
         # 执行填充并提供下载
         filled_docx = render_calendar_docx(
             st.session_state.active_template_path, 
             st.session_state.generated_json_data
         )
->>>>>>> parent of e07a703 (d)
         
         if filled_docx:
-            # 确保文件名安全
-            safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-            file_name = f"{safe_name}_教学日历.docx" if safe_name else "教学日历.docx"
-            
             st.download_button(
                 label="💾 点击下载已自动填充的模版文件 (.docx)",
                 data=filled_docx,
-                file_name=file_name,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="download_filled_docx"  # 唯一 key
-            )
-<<<<<<< HEAD
-        else:
-            st.error("模板渲染失败，请检查数据和模板格式。")
-
-
-
-=======
->>>>>>> parent of e07a703 (d)
-        
+                file_name=f"{name}_填充版教学日历.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ) mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+  
 def page_program():
     nav_bar(show_back=True)
     st.subheader("📋 专业人才培养方案生成")
