@@ -474,7 +474,8 @@ def page_calendar():
             - total_hours (必须为 {total_hours}), term_hours, total_weeks (必须为 {total_weeks}), weekly_hours
             - textbook_name, publisher, publish_date, textbook_remark
             - assessment_method, grading_formula, sign_date_1
-            - schedule: 这是一个列表，包含每一课次的: week, sess, content, req, hrs, method, other, obj
+            -{{course_name}}{{english_name}}{{course_code}}{{total_hours}}{{credits}}{{semester}}
+            - schedule: 这是一个列表，包含每一课次的: {{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}
             
             **结构要求：**
             - 进度表必须是一个名为 "schedule" 的数组。
