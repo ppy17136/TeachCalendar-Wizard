@@ -382,7 +382,7 @@ def render_calendar_docx(template_path, json_str):
         clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
         
         data = json.loads(clean_json)
-        
+        data = clean_none(data)
         # 3. 容错处理：确保进度表列表存在
         if "schedule" not in data or not isinstance(data["schedule"], list):
             data["schedule"] = []
@@ -400,6 +400,14 @@ def render_calendar_docx(template_path, json_str):
     except Exception as e:
         return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
 # ==================== 2. 教学日历模块页面 ====================
+def clean_none(obj):
+    if isinstance(obj, dict):
+        return {k: clean_none(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_none(x) for x in obj]
+    return "" if obj is None else obj
+
+data = clean_none(data)
 
 def page_calendar():
     nav_bar(show_back=True)
