@@ -369,32 +369,36 @@ def render_calendar_docx(template_path, json_str):
     except Exception as e:
         st.error(f"模版填充失败: {str(e)}")
         return None
+
 def render_calendar_docx(template_path, json_str):
     try:
-        # 1. 深度清洗 AI 输出，剔除所有 Markdown 杂质
-        # 有时 AI 会在 JSON 前后加文字，这里只截取 {} 之间的内容
-        match = re.search(r'(\{.*\}|\[.*\])', json_str, re.DOTALL)
-        if match:
-            clean_json = match.group(1)
-        else:
-            clean_json = json_str
-            
+        # 1. 深度清洗：只提取最外层 {} 之间的内容，排除所有 Markdown 说明
+        match = re.search(r'\{.*\}', json_str, re.DOTALL)
+        if not match:
+            return "ERROR: AI 生成的数据格式不正确，未发现 JSON 对象。"
+        
+        # 2. 移除 JSON 字符串中可能破坏 XML 的非法控制字符
+        clean_json = match.group(0)
+        clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
+        
         data = json.loads(clean_json)
         
-        # 2. 确保必要的键存在，防止渲染崩溃
-        if "schedule" not in data:
+        # 3. 容错处理：确保进度表列表存在
+        if "schedule" not in data or not isinstance(data["schedule"], list):
             data["schedule"] = []
             
-        # 3. 渲染
+        # 4. 执行渲染
         doc = DocxTemplate(template_path)
-        # 关键：使用 jinja_env 显式允许 tr 标签
-        doc.render(data)
+        # 允许不规范字符填充
+        doc.render(data, autoescape=True) 
         
         target_stream = io.BytesIO()
         doc.save(target_stream)
         return target_stream.getvalue()
+    except json.JSONDecodeError as e:
+        return f"ERROR: JSON 数据解析失败，请检查调试面板。错误详情: {str(e)}"
     except Exception as e:
-        return f"ERROR_RENDER:{str(e)}"
+        return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
 # ==================== 2. 教学日历模块页面 ====================
 
 def page_calendar():
