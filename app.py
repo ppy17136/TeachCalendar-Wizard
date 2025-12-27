@@ -342,35 +342,35 @@ def read_local_docx_structure(file_path):
     except:
         return "模版读取失败"
 
+
 def render_calendar_docx(template_path, json_str):
     try:
-        # 1. 深度清洗：只提取最外层 {} 之间的内容，排除所有 Markdown 说明
+        # 深度清洗 JSON：只保留 {} 之间的内容
         match = re.search(r'\{.*\}', json_str, re.DOTALL)
         if not match:
-            return "ERROR: AI 生成的数据格式不正确，未发现 JSON 对象。"
+            return "ERROR: 未发现有效的 JSON 字典内容。"
         
-        # 2. 移除 JSON 字符串中可能破坏 XML 的非法控制字符
         clean_json = match.group(0)
-        clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
-        
         data = json.loads(clean_json)
         
-        # 3. 容错处理：确保进度表列表存在
-        if "schedule" not in data or not isinstance(data["schedule"], list):
+        # 容错：确保 schedule 列表存在
+        if "schedule" not in data:
             data["schedule"] = []
             
-        # 4. 执行渲染
+        # 自动清洗：如果 AI 还是输出了 "N/A" 或 "未提供"，将其转为空字符串
+        for key, value in data.items():
+            if isinstance(value, str) and ("未提供" in value or "N/A" in value or "not provided" in value.lower()):
+                data[key] = ""
+        
         doc = DocxTemplate(template_path)
-        # 允许不规范字符填充
-        doc.render(data, autoescape=True) 
+        # 渲染
+        doc.render(data)
         
         target_stream = io.BytesIO()
         doc.save(target_stream)
         return target_stream.getvalue()
-    except json.JSONDecodeError as e:
-        return f"ERROR: JSON 数据解析失败，请检查调试面板。错误详情: {str(e)}"
     except Exception as e:
-        return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
+        return f"ERROR_RENDER: {str(e)}"
 
 # ==================== 2. 教学日历模块页面 ====================
 
@@ -440,7 +440,11 @@ def page_calendar():
             final_prompt = f"""
             # 角色
             你是一位精通 OBE（成果导向教育）理念、熟悉高校教学管理规范的资深教务专家。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确提取、转化并填充到【教学日历模板】的 JSON 数据结构中。
-
+            
+            # 核心禁令 (重要)
+            1. **严禁在输出中出现 "N/A"、"大纲未提供"、"暂无" 或类似的解释性文字。** 2. 如果大纲中确实缺失某个字段（如教材或获奖情况），**请直接留空 ("")**，或者基于专业知识进行合理的能动补全。
+            3. 严禁改变模板定义的 JSON 键名。
+            
             # 核心准则
             1. **大纲唯一性**：【教学大纲{syl_ctx}】是授课安排的唯一法定依据。所有教学内容、重点要求、学时分配必须严格遵循大纲原文，**严禁凭空编造大纲外的内容**。
             2. **结构对称性**：如果大纲中的教学模块数量少于总周数/课次，请将大纲中计划学时较长的模块拆分为连续的多个课次，确保进度平滑。
@@ -491,6 +495,7 @@ def page_calendar():
 
             # 输出格式
             仅输出 JSON 字符串，禁止输出 Markdown 代码块标记（如 ```json），确保 JSON 结构完整且合法。
+
             """
 
 
