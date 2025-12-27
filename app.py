@@ -350,28 +350,38 @@ def read_local_docx_structure(file_path):
     except:
         return "模版读取失败"
 
+
+
+
 def render_calendar_docx(template_path, json_str):
-    """
-    真正的填充逻辑：复制模版 -> 注入数据 -> 输出二进制流
-    """
     try:
-        # 1. 清洗 AI 可能输出的 Markdown 代码块标记
-        clean_json = re.sub(r'```json\s*|\s*```', '', json_str).strip()
+        # 1. 深度清洗：只提取最外层 {} 之间的内容，排除所有 Markdown 说明
+        match = re.search(r'\{.*\}', json_str, re.DOTALL)
+        if not match:
+            return "ERROR: AI 生成的数据格式不正确，未发现 JSON 对象。"
+        
+        # 2. 移除 JSON 字符串中可能破坏 XML 的非法控制字符
+        clean_json = match.group(0)
+        clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
+        
         data = json.loads(clean_json)
         
-        # 2. 加载模版 (支持路径或文件流)
+        # 3. 容错处理：确保进度表列表存在
+        if "schedule" not in data or not isinstance(data["schedule"], list):
+            data["schedule"] = []
+            
+        # 4. 执行渲染
         doc = DocxTemplate(template_path)
+        # 允许不规范字符填充
+        doc.render(data, autoescape=True) 
         
-        # 3. 渲染数据 (数据字典键值需与模版 {{标签}} 一一对应)
-        doc.render(data)
-        
-        # 4. 保存到内存流
         target_stream = io.BytesIO()
         doc.save(target_stream)
         return target_stream.getvalue()
+    except json.JSONDecodeError as e:
+        return f"ERROR: JSON 数据解析失败，请检查调试面板。错误详情: {str(e)}"
     except Exception as e:
-        st.error(f"模版填充失败: {str(e)}")
-        return None
+        return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
 
 # ==================== 2. 教学日历模块页面 ====================
 
@@ -442,13 +452,8 @@ def page_calendar():
             这个字典的键名（Key）必须严格匹配以下【模版标签】。
 
             **必须提取并填充的标签清单：**
-            - academic_year (如 2024—2025), semester (如 1)
-            - course_name (填充 {name}), class_info (专业年级)
-            - teacher_name, teacher_title
-            - total_hours (必须为 {total_hours}), term_hours, total_weeks (必须为 {total_weeks}), weekly_hours
-            - textbook_name, publisher, publish_date, textbook_remark
-            - assessment_method, grading_formula, sign_date_1
-            - schedule: 这是一个列表，包含每一课次的: week, sess, content, req, hrs, method, other, obj
+            - schedule: 这是一个列表，包含每一课次的内容: {{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}
+            - 进度表数据必须放在键名为 "schedule" 的数组中。
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
