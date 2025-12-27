@@ -482,7 +482,7 @@ def page_calendar():
                 data=filled_docx,
                 file_name=f"{name}_填充版教学日历.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ) mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ) 
         
   
 def page_program():
