@@ -439,44 +439,54 @@ def page_calendar():
             # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
             # 角色
-            你是一位严谨的高校教务专家。你的唯一任务是将【教学大纲】中“三、教学内容与要求”表格的内容，精准搬运并适配到【教学日历】的 JSON 数据中。
+            你是一位资深高校教务专家，精通 OBE（成果导向教育）理念及高校教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确填充到【教学日历模板{template_desc}】的标签体系中。
 
-            # 核心准则：像素级对齐 (Pixel-Level Alignment)
-            1. **禁止原创**：严禁引入任何大纲表格之外的章节名称或知识点。大纲是授课的唯一法律依据。
-            2. **逻辑分摊**：大纲总学时为 {total_hours}，日历总课次为 {total_weeks} (假设每课次2学时)。请按以下逻辑分摊：
-               - 顺序遍历大纲“教学内容与要求”表的序号 1-9。
-               - 如果大纲某序号的“计划学时”大于2（如序号7有8学时），必须将其拆分为连续的多个课次。
-               - 如果大纲某序号学时为1（如序号1），则应与下一个序号合并在同一个课次中。
-            3. **内容对应关系**：
-               - JSON 键 `content` 对应大纲表的“教学内容”。
-               - JSON 键 `req` 对应大纲表的“学生学习预期成果”。
-               - JSON 键 `obj` 对应大纲表的“支撑目标”。
-               - JSON 键 `other` 对应大纲表的“其它（作业、习题等）”。
+            # 核心准则
+            1. 纲领性原则：教学大纲{syl_ctx}是授课安排的唯一法律依据，所有教学内容、学时分配和考核方式必须严格遵循大纲{syl_ctx}原文。
+            2. 逻辑一致性：教学进度表（schedule）中的“学时”总和必须精确等于总学时 {total_hours}。
 
-            # 1. 基础信息提取
-            请在大纲“一、课程基本信息”表中提取以下信息：
-            - school_name: {school_name}
-            - course_name: {course_name}
-            - total_hours: {total_hours} (大纲原文应为24)
-            - lecture_hours, lab_hours, course_nature: 严格按大纲表格提取。
-            - textbook_name, publisher, publish_date: 严格提取大纲“建议教材”内容，严禁输出“N/A”。
-            - references: 提取大纲“参考资料”列表。
-            - grading_formula: 提取大纲“四、课程目标考核”中关于成绩比例的描述。
+            # 任务目标
+            阅读提供的资料，输出一个纯 JSON 字典。键名（Key）必须与模板{template_desc}标签 {{ 标签 }} 严格一一对应，确保 JSON 结构合法、无截断、无 Markdown 代码块包装。
+            
+            # 数据字典映射指南 (JSON Keys)
+            1. 基础信息：
+               - school_name: {school_name}
+               - academic_year (学年)（如2025-2026）, semester (学期)（如1，即这一学年的第一学期，通常在每年的8月末开始）
+               - course_name (课程名称), class_info (学生专业及年级)（如材料成型及控制工程 22级）
+               - teacher_name (主讲教师姓名), teacher_title (职称)
+               - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
 
-            # 2. 进度表生成 (Key: "schedule")
-            必须基于大纲表格逐行生成列表对象：
-            - week, sess: 递增数字。
-            - content, req, hrs, method, other, obj: 必须来自大纲对应行。
-            - **思政要求**：仅在大纲指定的课次中融入思政，或参考大纲末尾的“课程思政实施内容”表中的案例（如：两弹一星元勋、国产工业软件）。
+            2. 教材与考核：（如果大纲中有相关信息，遵照大纲{syl_ctx}）
+               - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
+               - references: 参考书目列表
+               - assessment_method (考核方式)（如考试或考查）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
 
-            # 禁令
-            - 严禁输出 "N/A"、"暂无" 或 "大纲未提供"。若为空，请输出 ""。
-            - 严禁输出 Markdown 代码块。
-            - 严禁截断 JSON。
+            3. 签字与备注：
+               - sign_date_1, sign_date_2, sign_date_3 (日期占位)
+               - note_1, note_2, note_3 (备注内容)（要简略）
+
+            4. 教学进度主表 (Key: "schedule"，列表对象)：
+               - 每个对象必须包含以下键：
+                 - week: 周次（数字序列 1, 2, 3...），就是开学后的第一周、第二周、……
+                 - sess: 课次（数字序列 1, 2, 3...），实际上就是第1次课，第2次课，……
+                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题安排）
+                 - req: 学习重点、教学要求（一定要遵照大纲{syl_ctx}）
+                 - hrs: 该课次学时
+                 - method: 教学方法
+                 - other: 其它（作业、习题、实验等）
+                 - obj: 支撑教学目标（如课程目标1，不要写具体内容）
+
+            # 撰写与生成逻辑
+            - 学时分配：参照大纲“教学内容与学时分配”部分，将学时平摊至每一课次，注意，大纲中的课程内容可能要进行分解，确保 schedule 列表总学时 = {total_hours}。
+            
+            - 思政融入：在教学内容或学习重点中，随机选择 2-3 处融入思政元素（如：工程伦理、工匠精神、国产软件自主化、科学家精神等）。
+            - 输出格式：仅输出 JSON 字符串，禁止任何 Markdown 标记或解释文字。不要缺失内容。
 
             # 参考资料
-            - 大纲全文：{syl_ctx[:10000]}
-            - 核心参数：课程 {course_name} | 总学时 {total_hours} | 预设周数 {total_weeks}
+            - 教学大纲全文：{syl_ctx[:8000]}
+            - 模板描述：{template_desc}
+            - 核心参数：课程 {course_name} | 总学时 {total_hours} | 周数 {total_weeks}
+
             """
 
 
