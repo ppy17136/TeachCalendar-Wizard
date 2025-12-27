@@ -439,60 +439,55 @@ def page_calendar():
             # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
             # 角色
-            你是一位精通 OBE（成果导向教育）理念、熟悉高校教学管理规范的资深教务专家。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确提取、转化并填充到【教学日历模板】的 JSON 数据结构中。
+            你是一位资深高校教务专家，精通 OBE（成果导向教育）理念及高校教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确填充到【教学日历模板{template_desc}】的标签体系中。
 
             # 核心准则
-            1. **大纲唯一性**：【教学大纲{syl_ctx}】是授课安排的唯一法定依据。所有教学内容、重点要求、学时分配必须严格遵循大纲原文，**严禁凭空编造大纲外的内容**。
-            2. **结构对称性**：如果大纲中的教学模块数量少于总周数/课次，请将大纲中计划学时较长的模块拆分为连续的多个课次，确保进度平滑。
-            3. **数据一致性**：进度表（schedule）中所有课次学时（hrs）之和必须精确等于课程总学时 {total_hours}。
+            1. 纲领性原则：教学大纲{syl_ctx}是授课安排的唯一法律依据，所有教学内容、学时分配和考核方式必须严格遵循大纲{syl_ctx}原文。
+            2. 逻辑一致性：教学进度表（schedule）中的“学时”总和必须精确等于总学时 {total_hours}。
 
             # 任务目标
-            输出一个纯 JSON 字典。该字典的键名（Key）必须与模板标签 {{{{ 标签名 }}}} 严格对应。
+            阅读提供的资料，输出一个纯 JSON 字典。键名（Key）必须与模板{template_desc}标签 {{ 标签 }} 严格一一对应，确保 JSON 结构合法、无截断、无 Markdown 代码块包装。
+            
+            # 数据字典映射指南 (JSON Keys)
+            1. 基础信息：
+               - school_name: {school_name}
+               - academic_year (学年)（如2025-2026）, semester (学期)（如1，即这一学年的第一学期，通常在每年的8月末开始）
+               - course_name (课程名称), class_info (学生专业及年级)（如材料成型及控制工程 22级）
+               - teacher_name (主讲教师姓名), teacher_title (职称)
+               - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
 
-            # 1. 基础信息标签映射 (Key Mapping)
-            - school_name: {school_name}
-            - academic_year: 格式如 "2024-2025"
-            - semester: "1" 或 "2"
-            - course_name: {name}
-            - class_info: 学生专业年级（如：材料成型及控制工程22-1,2班）
-            - teacher_name: 主讲教师姓名 | teacher_title: 职称
-            - total_hours: {total_hours} | term_hours: {total_hours}
-            - total_weeks: {total_weeks} | weekly_hours: 计算得出的周学时
-            - lecture_hours, lab_hours, quiz_hours, extra_hours: 根据大纲学时分配表提取
-            - course_nature: 必修/限选/选修
-            - textbook_name, publisher, publish_date, textbook_remark: 教材相关信息
-            - references: 参考书目字符串或列表
-            - assessment_method: 考试/考查 | grading_formula: 成绩构成比例
-            - sign_date_1, sign_date_2, sign_date_3: 日期占位符
+            2. 教材与考核：（如果大纲中有相关信息，遵照大纲{syl_ctx}）
+               - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
+               - references: 参考书目列表
+               - assessment_method (考核方式)（如考试或考查）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
 
-            # 2. 教学进度主表 (Key: "schedule"，必须为列表对象)
-            每个列表项必须包含以下 Key（请根据模板标签 {template_desc} 自动适配）：
-            - week: 周次 (1, 2, 3...)
-            - sess: 课次 (1, 2, 3...)
-            - content: 教学内容 (严格对应大纲章节标题)
-            - req: 学习重点与教学要求 (严格对应大纲中该章节的要求)
-            - hrs: 本课次学时 (通常为 2 或 3)
-            - method: 教学方法 (讲授/案例/讨论等)
-            - other: 其它 (作业布置、习题等)
-            - obj: 支撑教学目标 (如：目标1，目标2)
+            3. 签字与备注：
+               - sign_date_1, sign_date_2, sign_date_3 (日期占位)
+               - note_1, note_2, note_3 (备注内容)（要简略）
 
-            # 撰写与生成逻辑逻辑
-            - **像素级对齐**：在大纲中定位“教学内容与学时分配”表 [cite: 39]。将每一行内容映射到日历的课次中。
-            - **学时拆分策略**：大纲中模块 4 若为 3 学时，而日历每课次为 2 学时，则应拆分为：
-              - 课次 N: 模块 4 (1/2)，2 学时
-              - 课次 N+1: 模块 4 (2/2)，1 学时
-            - **能动补全**：若大纲中“教学方法”或“支撑目标”缺失，请基于工程教育认证规范撰写专业内容。
-            - **思政融入**：在 2-3 处教学内容中自然嵌入思政元素（如：大国重器、工程伦理、工匠精神）。
+            4. 教学进度主表 (Key: "schedule"，列表对象)：
+               - 每个对象必须包含以下键：
+                 - week: 周次（数字序列 1, 2, 3...），就是开学后的第一周、第二周、……
+                 - sess: 课次（数字序列 1, 2, 3...），实际上就是第1次课，第2次课，……
+                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题安排）
+                 - req: 学习重点、教学要求（一定要遵照大纲{syl_ctx}）
+                 - hrs: 该课次学时
+                 - method: 教学方法
+                 - other: 其它（作业、习题、实验等）
+                 - obj: 支撑教学目标（如课程目标1，不要写具体内容）
+
+            # 撰写与生成逻辑
+            - 学时分配：参照大纲“教学内容与学时分配”部分，将学时平摊至每一课次，确保 schedule 列表总学时 = {total_hours}。
+            - 能动补全：若大纲缺失某课次的“学习重点”、“教学方法”或“支撑目标”，请基于专业教学标准及工程教育认证规范，撰写专业且具体的内容。
+            - 思政融入：在教学内容或学习重点中，随机选择 2-3 处融入思政元素（如：工程伦理、工匠精神、国产软件自主化、科学家精神等）。
+            - 输出格式：仅输出 JSON 字符串，禁止任何 Markdown 标记或解释文字。不要缺失内容。
 
             # 参考资料
             - 教学大纲全文：{syl_ctx[:8000]}
-            - 模板标签参考：{template_desc}
-            - 核心参数：课程 {name} | 总学时 {total_hours} | 总周数 {total_weeks}
+            - 模板描述：{template_desc}
+            - 核心参数：课程 {course_name} | 总学时 {total_hours} | 周数 {total_weeks}
 
-            # 输出格式
-            仅输出 JSON 字符串，禁止输出 Markdown 代码块标记（如 ```json），确保 JSON 结构完整且合法。
             """
-
 
             # 调用 AI 引擎提取 JSON
             json_res = ai_generate(final_prompt, engine_id, selected_model)
