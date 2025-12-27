@@ -475,7 +475,7 @@ def page_calendar():
             - textbook_name, publisher, publish_date, textbook_remark
             - assessment_method, grading_formula, sign_date_1
             -{{course_name}}{{english_name}}{{course_code}}{{total_hours}}{{credits}}{{semester}}
-            - schedule: 这是一个列表，包含每一课次的: {% for s in schedule %}{{ s.week_num }}	{{ s.session_num }}	{{ s.teaching_content }}	{{ s.learning_focus }}	{{ s.hours }}	{{ s.teaching_method }}	{{ s.objective }}{% endfor %}
+            - schedule: 这是一个列表，包含每一课次的: {{ s.week_num }}	{{ s.session_num }}	{{ s.teaching_content }}	{{ s.learning_focus }}	{{ s.hours }}	{{ s.teaching_method }}	{{ s.objective }}
             
             **结构要求：**
             - 进度表必须是一个名为 "schedule" 的数组。
