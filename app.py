@@ -445,41 +445,41 @@ def page_calendar():
             2. 逻辑一致性：教学进度表（schedule）中的“学时”总和必须精确等于总学时 {total_hours}。
 
             # 任务目标
-            阅读提供的资料，输出一个纯 JSON 字典。键名（Key）必须与模板标签 {{ 标签 }} 严格一一对应，确保 JSON 结构合法、无截断、无 Markdown 代码块包装。
+            阅读提供的资料，输出一个纯 JSON 字典。键名（Key）必须与模板{template_desc}标签 {{ 标签 }} 严格一一对应，确保 JSON 结构合法、无截断、无 Markdown 代码块包装。
             
             # 数据字典映射指南 (JSON Keys)
             1. 基础信息：
                - school_name: 默认为“辽宁石油化工大学”（大纲有特定信息则按大纲{syl_ctx}）
-               - academic_year (学年), semester (学期)
-               - course_name (课程名称), class_info (学生专业及年级)
+               - academic_year (学年)（如2025-2026）, semester (学期)（如1，即这一学年的第一学期，通常在每年的8月末开始）
+               - course_name (课程名称), class_info (学生专业及年级)（如材料成型及控制工程 22级）
                - teacher_name (主讲教师姓名), teacher_title (职称)
                - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
 
-            2. 教材与考核：（遵照大纲{syl_ctx}）
+            2. 教材与考核：（如果大纲中有相关信息，遵照大纲{syl_ctx}）
                - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
                - references: 参考书目列表
-               - assessment_method (考核方式), grading_formula (成绩计算方法)
+               - assessment_method (考核方式)（如考试或考查）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
 
             3. 签字与备注：
                - sign_date_1, sign_date_2, sign_date_3 (日期占位)
-               - note_1, note_2, note_3 (备注内容)
+               - note_1, note_2, note_3 (备注内容)（要简略）
 
             4. 教学进度主表 (Key: "schedule"，列表对象)：
                - 每个对象必须包含以下键：
                  - week: 周次（数字序列 1, 2, 3...），就是开学后的第一周、第二周、……
                  - sess: 课次（数字序列 1, 2, 3...），实际上就是第1次课，第2次课，……
-                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题）
-                 - req: 学习重点、教学要求（一定要严格遵照大纲{syl_ctx}）
+                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题安排）
+                 - req: 学习重点、教学要求（一定要遵照大纲{syl_ctx}）
                  - hrs: 该课次学时
                  - method: 教学方法
                  - other: 其它（作业、习题、实验等）
-                 - obj: 支撑教学目标
+                 - obj: 支撑教学目标（如课程目标1，不要写具体内容）
 
             # 撰写与生成逻辑
             - 学时分配：参照大纲“教学内容与学时分配”部分，将学时平摊至每一课次，确保 schedule 列表总学时 = {total_hours}。
             - 能动补全：若大纲缺失某课次的“学习重点”、“教学方法”或“支撑目标”，请基于专业教学标准及工程教育认证规范，撰写专业且具体的内容。
             - 思政融入：在教学内容或学习重点中，随机选择 2-3 处融入思政元素（如：工程伦理、工匠精神、国产软件自主化、科学家精神等）。
-            - 输出格式：仅输出 JSON 字符串，禁止任何 Markdown 标记或解释文字。
+            - 输出格式：仅输出 JSON 字符串，禁止任何 Markdown 标记或解释文字。不要缺失内容。
 
             # 参考资料
             - 教学大纲全文：{syl_ctx[:8000]}
