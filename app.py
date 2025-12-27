@@ -453,7 +453,7 @@ def page_calendar():
             - school_name: {school_name}
             - academic_year: 格式如 "2024-2025"
             - semester: "1" 或 "2"
-            - course_name: {name}
+            - course_name: {course_name}
             - class_info: 学生专业年级（如：材料成型及控制工程22-1,2班）
             - teacher_name: 主讲教师姓名 | teacher_title: 职称
             - total_hours: {total_hours} | term_hours: {total_hours}
@@ -487,7 +487,7 @@ def page_calendar():
             # 参考资料
             - 教学大纲全文：{syl_ctx[:8000]}
             - 模板标签参考：{template_desc}
-            - 核心参数：课程 {name} | 总学时 {total_hours} | 总周数 {total_weeks}
+            - 核心参数：课程 {course_name} | 总学时 {total_hours} | 总周数 {total_weeks}
 
             # 输出格式
             仅输出 JSON 字符串，禁止输出 Markdown 代码块标记（如 ```json），确保 JSON 结构完整且合法。
