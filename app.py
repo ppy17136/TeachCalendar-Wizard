@@ -475,11 +475,11 @@ def page_calendar():
             - textbook_name, publisher, publish_date, textbook_remark
             - assessment_method, grading_formula, sign_date_1
             -{{course_name}}{{english_name}}{{course_code}}{{total_hours}}{{credits}}{{semester}}
-            - schedule: 这是一个列表，包含每一课次的: {{ s.week_num }}	{{ s.session_num }}	{{ s.teaching_content }}	{{ s.learning_focus }}	{{ s.hours }}	{{ s.teaching_method }}	{{ s.objective }}
+            - schedule: 这是一个列表，包含每一课次的: {{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}
             
             **结构要求：**
             - 进度表必须是一个名为 "schedule" 的数组。
-            - 数组中的每个对象必须包含键：week, sess, content, req, hrs, method, other, obj。
+            - 数组中的每个对象必须包含键：{{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}。
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
