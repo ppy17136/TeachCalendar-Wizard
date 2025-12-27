@@ -438,57 +438,53 @@ def page_calendar():
             # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
             # 角色
-            你是一位资深高校教务专家，精通 OBE（成果导向教育）理念与教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其完美填充到【教学日历模板{template_desc}】的标签体系中。注意大纲是授课安排的依据。
+            你是一位资深高校教务专家，精通 OBE（成果导向教育）理念及高校教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确填充到【教学日历模板{template_desc}】的标签体系中。
 
-            # 核心任务
-            请阅读提供的【教学大纲{syl_ctx}】文本，提取关键信息并撰写缺失内容，最终输出一个纯 JSON 字典。该字典的键名（Key）必须与模板中的 {{ 标签 }} 严格一一对应。
+            # 核心准则
+            1. 纲领性原则：教学大纲是授课安排的唯一法律依据，所有教学内容、学时分配和考核方式必须严格遵循大纲原文。
+            2. 逻辑一致性：教学进度表（schedule）中的“学时”总和必须精确等于总学时 {total_hours}。
 
-            # 标签映射指南（Key 列表）
+            # 任务目标
+            阅读提供的资料，输出一个纯 JSON 字典。键名（Key）必须与模板标签 {{ 标签 }} 严格一一对应，确保 JSON 结构合法、无截断、无 Markdown 代码块包装。
+            
+            # 数据字典映射指南 (JSON Keys)
             1. 基础信息：
-               - academic_year, semester, course_name, class_info, teacher_name, teacher_title
-               - total_hours, term_hours, total_weeks, weekly_hours, course_nature
+               - school_name: 默认为“辽宁石油化工大学”（大纲有特定信息则按大纲）
+               - academic_year (学年), semester (学期)
+               - course_name (课程名称), class_info (学生专业及年级)
+               - teacher_name (主讲教师姓名), teacher_title (职称)
+               - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
+
             2. 教材与考核：
-               - textbook_name, publisher, publish_date, textbook_remark, assessment_method, grading_formula
+               - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
+               - references: 参考书目列表
+               - assessment_method (考核方式), grading_formula (成绩计算方法)
+
             3. 签字与备注：
-               - sign_date_1, sign_date_2, sign_date_3, note_1, note_2, note_3
-            4. 教学进度主表（核心：必须为名为 "schedule" 的列表对象）：
-               - 每个对象包含：week, sess, content, req, hrs, method, obj（分别对应周次（按顺序1、2、3……），课次（按顺序1、2、3……），教学内容
-(写明章节标题)，学习重点、教学要求，学时，教学方法，其它
-(作业等)，支撑教学目标）
+               - sign_date_1, sign_date_2, sign_date_3 (日期占位)
+               - note_1, note_2, note_3 (备注内容)
 
+            4. 教学进度主表 (Key: "schedule"，列表对象)：
+               - 每个对象必须包含以下键：
+                 - week: 周次（数字序列 1, 2, 3...）
+                 - sess: 课次（数字序列 1, 2, 3...）
+                 - content: 教学内容（严格按大纲章节标题）
+                 - req: 学习重点、教学要求
+                 - hrs: 该课次学时
+                 - method: 教学方法
+                 - other: 其它（作业、习题、实验等）
+                 - obj: 支撑教学目标
 
-            # 撰写逻辑约束
-            - **学时逻辑**：确保 schedule 列表中所有课次的 hours 之和严格等于 {total_hours}。
-            - **能动性撰写**：如果大纲中未明确某课次的“学习重点”或“支撑目标”，请基于该章节的学术规范，撰写专业、具体的内容。
-            - **思政融入**：请在教学内容或重点中随机嵌入 2-3 处思政元素（如：工程伦理、工匠精神、国产软件自主化等）。
-            - **格式要求**：严禁输出 Markdown 代码块标记（如 ```json ），直接输出以 纯 JSON 字符串，不要任何多余描述，确保 JSON 结构合法，不要截断。
+            # 撰写与生成逻辑
+            - 学时分配：参照大纲“教学内容与学时分配”部分，将学时平摊至每一课次，确保 schedule 列表总学时 = {total_hours}。
+            - 能动补全：若大纲缺失某课次的“学习重点”、“教学方法”或“支撑目标”，请基于专业教学标准及工程教育认证规范，撰写专业且具体的内容。
+            - 思政融入：在教学内容或学习重点中，随机选择 2-3 处融入思政元素（如：工程伦理、工匠精神、国产软件自主化、科学家精神等）。
+            - 输出格式：仅输出 JSON 字符串，禁止任何 Markdown 标记或解释文字。
 
             # 参考资料
             - 教学大纲全文：{syl_ctx[:8000]}
-            - 课程名称：{{ course_name }}
-            - 总学时/周数：{total_hours} / {total_weeks}
-                        
-
-            **必须提取并填充的标签清单：**
-            - schedule: （主要授课内容在大纲{syl_ctx}的类似名称为“教学内容与要求”部分）这是一个列表，包含每一课次的内容: {{week}}	{{sess}} {{content}} {{req}} {{hrs}} {{method}}	{{other}} {{obj}}
-            - 进度表数据必须放在键名为 "schedule" 的数组中。
-            课程名称：	{{ course_name }}
-            学生专业及年级：	{{ class_info }}
-            主讲教师姓名：	{{ teacher_name }}   职称：{{ teacher_title }}
-            课程总学时数：	{{ total_hours }}	
-            本学期总学时数：	{{ term_hours }}	
-            讲课学时：	{{ lecture_hours }}
-            本学期上课周数：	{{ total_weeks }}	
-            实验学时：	{{ lab_hours }}
-            平均每周学时数：	{{ weekly_hours }}	
-            测验学时：	{{ quiz_hours }}
-            课程性质：	{{ course_nature }}	
-            课外学时：	{{ extra_hours }}
-            学校名称：{{ school_name }}
-            使用教材名称：{{ textbook_name }}	出版社：	{{ publisher }}	出版时间：{{ publish_date }}	获奖情况：{{ textbook_remark }}
-            参考书目：references
-            考核方式：	{{ assessment_method }}	
-            成绩计算方法：	{{ grading_formula }}
+            - 模板描述：{template_desc}
+            - 核心参数：课程 {course_name} | 总学时 {total_hours} | 周数 {total_weeks}
 
             """
 
