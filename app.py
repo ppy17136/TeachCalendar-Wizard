@@ -396,6 +396,7 @@ def render_calendar_docx(template_path, json_str):
 
 
 
+
 def page_calendar():
     nav_bar(show_back=True)
     st.subheader("📅 智能填充教学日历 (基于 docxtpl 模版技术)")
@@ -415,35 +416,49 @@ def page_calendar():
     # --- 2. 模版选择 ---
     st.divider()
     t_col1, t_col2 = st.columns([1, 2])
+    
     with t_col1:
         template_choice = st.selectbox(
             "选择要填充的模版", 
-            ["辽宁石油化工大学模版", "通用模版", "上传自定义模版"]
+            ["使用修复后的模板", "辽宁石油化工大学模版", "通用模版", "上传自定义模版"],
+            key="template_choice"
         )
     
     # 确定物理模版路径
     current_template_path = ""
-    template_desc = ""
     
     if template_choice == "上传自定义模版":
-        custom_file = st.file_uploader("上传您的 .docx 模版", type=["docx"])
+        custom_file = st.file_uploader("上传您的 .docx 模版", type=["docx"], key="custom_uploader")
         if custom_file:
-            current_template_path = custom_file # docxtpl 可以直接接受文件流
-            template_desc = "自定义模版"
+            # 保存为临时文件
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+                tmp.write(custom_file.getvalue())
+                current_template_path = tmp.name
     elif template_choice == "通用模版":
-        current_template_path = "template_general.docx"
-        template_desc = read_local_docx_structure(current_template_path)
-    else:
-        current_template_path = "template_lnpu.docx"
-        template_desc = read_local_docx_structure(current_template_path)
-
+        if os.path.exists("template_general.docx"):
+            current_template_path = "template_general.docx"
+        else:
+            st.warning("template_general.docx 不存在，将使用修复后的模板")
+            current_template_path = "template_fixed.docx"
+    elif template_choice == "辽宁石油化工大学模版":
+        if os.path.exists("template_lnpu.docx"):
+            current_template_path = "template_lnpu.docx"
+        else:
+            st.warning("template_lnpu.docx 不存在，将使用修复后的模板")
+            current_template_path = "template_fixed.docx"
+    else:  # "使用修复后的模板"
+        # 确保修复后的模板存在
+        if not os.path.exists("template_fixed.docx"):
+            create_fixed_template_from_xml()
+        current_template_path = "template_fixed.docx"
+    
     # --- 3. 数据来源关联 ---
     st.markdown("##### 📚 数据提取来源")
     col_u4, col_u5 = st.columns(2)
-    syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'])
+    syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'], key="syllabus_uploader")
     
-    if st.button("🚀 提取大纲数据并填充模版"):
-        if not current_template_path:
+    if st.button("🚀 提取大纲数据并填充模版", key="generate_data_btn"):
+        if not current_template_path or not os.path.exists(current_template_path):
             st.error("请先指定有效的模版文件")
             return
 
@@ -457,77 +472,82 @@ def page_calendar():
             else:
                 syl_ctx = "未提供具体大纲，请按常识生成标准数据。"
 
-            # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
+            # 关键：要求 AI 输出 JSON 字典
             final_prompt = f"""
             你是一个教学数据处理专家。请阅读【教学大纲】，将其内容转化为一个 JSON 字典。
             这个字典的键名（Key）必须严格匹配以下【模版标签】。
 
             **必须提取并填充的标签清单：**
-            - academic_year (如 2024—2025), semester (如 1)
-            - course_name (填充 {name}), class_info (专业年级)
-            - teacher_name, teacher_title
-            - total_hours (必须为 {total_hours}), term_hours, total_weeks (必须为 {total_weeks}), weekly_hours
-            - textbook_name, publisher, publish_date, textbook_remark
-            - assessment_method, grading_formula, sign_date_1
-            -{{course_name}}{{english_name}}{{course_code}}{{total_hours}}{{credits}}{{semester}}
-            - schedule: 这是一个列表，包含每一课次的: {{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}
+            - course_name (填充 {name}), english_name, course_code
+            - total_hours (必须为 {total_hours}), credits, semester
+            - schedule: 这是一个列表，包含每一课次的: week_num, session_num, teaching_content, learning_focus, hours, teaching_method, objective
             
             **结构要求：**
             - 进度表必须是一个名为 "schedule" 的数组。
-            - 数组中的每个对象必须包含键：{{ week_num }}	{{ session_num }}	{{ teaching_content }}	{{ learning_focus }}	{{ hours }}	{{ teaching_method }}	{{ objective }}。
+            - 数组中的每个对象必须包含键：week_num, session_num, teaching_content, learning_focus, hours, teaching_method, objective。
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
             2. 确保 JSON 结构合法，不要截断。
             3. 参考大纲内容：{syl_ctx[:8000]}
+            
+            **示例格式：**
+            {{
+              "course_name": "{name}",
+              "english_name": "Numerical Simulation in Material Forming",
+              "course_code": "ME401",
+              "total_hours": {total_hours},
+              "credits": 2.0,
+              "semester": "第7学期",
+              "schedule": [
+                {{
+                  "week_num": "1",
+                  "session_num": "1",
+                  "teaching_content": "课程介绍与数值模拟概述",
+                  "learning_focus": "了解课程目标与数值模拟基本概念",
+                  "hours": "2",
+                  "teaching_method": "讲授+讨论",
+                  "objective": "课程目标1"
+                }}
+              ]
+            }}
             """
-
-
-
-
-
+            
             # 调用 AI 引擎提取 JSON
             json_res = ai_generate(final_prompt, engine_id, selected_model)
             
-            # 将生成的 JSON 和模版路径存入缓存，供下载调用
+            # 将生成的 JSON 和模版路径存入缓存
             st.session_state.generated_json_data = json_res
             st.session_state.active_template_path = current_template_path
             
-            st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")
+            st.success("✅ 数据提取完成！")
 
     # --- 4. 预览与下载 ---
     if st.session_state.get("generated_json_data"):
-        # 增加一个明显的调试标识
-        st.info("🛠️ 调试模式：请检查下方 JSON 标签是否与模板 {{ 标签 }} 一一对应")
-        
         with st.expander("🔍 查看 AI 提取的填充数据（JSON 格式）", expanded=True):
-            st.code(st.session_state.generated_json_data, language="json")            
-            
-            
+            st.code(st.session_state.generated_json_data, language="json")
         
-        # 执行填充并提供下载
-        filled_docx = render_calendar_docx(
-            st.session_state.active_template_path, 
-            st.session_state.generated_json_data
-        )
-        if isinstance(filled_docx, (bytes, bytearray)):
-            st.download_button(
-                label="💾 点击下载已自动填充的模版文件 (.docx)",
-                data=filled_docx,
-                file_name=f"{name}_填充版教学日历.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # 执行填充
+        with st.spinner("正在渲染模板..."):
+            filled_docx = render_calendar_docx(
+                st.session_state.active_template_path, 
+                st.session_state.generated_json_data
             )
-        else:
-            st.error("未生成可下载的 docx（渲染失败）。")
         
         if filled_docx:
+            # 确保文件名安全
+            safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            file_name = f"{safe_name}_教学日历.docx" if safe_name else "教学日历.docx"
+            
             st.download_button(
                 label="💾 点击下载已自动填充的模版文件 (.docx)",
                 data=filled_docx,
-                file_name=f"{name}_填充版教学日历.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                file_name=file_name,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_filled_docx"  # 唯一 key
             )
-
+        else:
+            st.error("模板渲染失败，请检查数据和模板格式。")
 
 
 
