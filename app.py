@@ -394,12 +394,12 @@ def page_calendar():
     name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
     try:
-        default_hours = int(st.session_state.get('total_hours', 32))
+        default_hours = int(st.session_state.get('total_hours', 24))
     except:
-        default_hours = 32
+        default_hours = 24
         
     total_hours = col_u2.number_input("总学时", value=default_hours)
-    total_weeks = col_u3.number_input("总周数", value=16)  
+    total_weeks = col_u3.number_input("总周数", value=12)  
     
     # --- 2. 模版选择 ---
     st.divider()
