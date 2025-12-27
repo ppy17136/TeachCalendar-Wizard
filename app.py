@@ -379,6 +379,7 @@ def page_calendar():
     st.subheader("📅 智能填充教学日历 (基于 docxtpl 模版技术)")
     
     # --- 1. 基础参数与状态同步 ---
+    school_name=st.text_input("学校名称", value="辽宁石油化工大学")
     col_u1, col_u2, col_u3 = st.columns(3)
     course_name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
