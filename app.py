@@ -351,12 +351,31 @@ def read_local_docx_structure(file_path):
     except:
         return "模版读取失败"
 
+def render_calendar_docx(template_path, json_str):
+    try:
+        clean_json = re.sub(r'```json\s*|\s*```', '', json_str).strip()
+        data = json.loads(clean_json)
+        
+        # --- 新增：确保 schedule 键存在，防止 's' is undefined 报错 ---
+        if "schedule" not in data:
+            data["schedule"] = [] 
+            
+        doc = DocxTemplate(template_path)
+        doc.render(data)
+        
+        target_stream = io.BytesIO()
+        doc.save(target_stream)
+        return target_stream.getvalue()
+    except Exception as e:
+        st.error(f"模版填充失败: {str(e)}")
+        return None
 def clean_none(obj):
     if isinstance(obj, dict):
         return {k: clean_none(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [clean_none(x) for x in obj]
     return "" if obj is None else obj
+<<<<<<< HEAD
 
 
 from docx import Document
@@ -437,19 +456,26 @@ def render_calendar_docx(template_path, json_str):
         st.info(f"正在渲染模板: {template_path}")
         
         # 1) 提取最外层 JSON
+=======
+def render_calendar_docx(template_path, json_str):
+    try:
+        # 1. 深度清洗：只提取最外层 {} 之间的内容，排除所有 Markdown 说明
+>>>>>>> parent of e07a703 (d)
         match = re.search(r'\{.*\}', json_str, re.DOTALL)
         if not match:
-            raise ValueError("未发现 JSON 对象（最外层 {} ）")
-
+            return "ERROR: AI 生成的数据格式不正确，未发现 JSON 对象。"
+        
+        # 2. 移除 JSON 字符串中可能破坏 XML 的非法控制字符
         clean_json = match.group(0)
         clean_json = "".join(ch for ch in clean_json if ord(ch) >= 32 or ch in "\n\r\t")
-
+        
         data = json.loads(clean_json)
         data = clean_none(data)
-
+        # 3. 容错处理：确保进度表列表存在
         if "schedule" not in data or not isinstance(data["schedule"], list):
             data["schedule"] = []
             
+<<<<<<< HEAD
         # 显示数据预览
         with st.expander("🔍 查看渲染数据"):
             st.json(data)
@@ -503,6 +529,21 @@ def render_calendar_docx(template_path, json_str):
         return None
 
 
+=======
+        # 4. 执行渲染
+        doc = DocxTemplate(template_path)
+        # 允许不规范字符填充
+        doc.render(data, autoescape=True) 
+        
+        target_stream = io.BytesIO()
+        doc.save(target_stream)
+        return target_stream.getvalue()
+    except json.JSONDecodeError as e:
+        return f"ERROR: JSON 数据解析失败，请检查调试面板。错误详情: {str(e)}"
+    except Exception as e:
+        return f"ERROR: 模板填充崩溃。这通常是因为 Word 模板内部标签被拆分。错误详情: {str(e)}"
+# ==================== 2. 教学日历模块页面 ====================
+>>>>>>> parent of e07a703 (d)
 
 
 
@@ -637,12 +678,20 @@ def page_calendar():
         with st.expander("🔍 查看 AI 提取的填充数据（JSON 格式）", expanded=True):
             st.code(st.session_state.generated_json_data, language="json")
         
+<<<<<<< HEAD
         # 执行填充
         with st.spinner("正在渲染模板..."):
             filled_docx = render_calendar_docx(
                 st.session_state.active_template_path, 
                 st.session_state.generated_json_data
             )
+=======
+        # 执行填充并提供下载
+        filled_docx = render_calendar_docx(
+            st.session_state.active_template_path, 
+            st.session_state.generated_json_data
+        )
+>>>>>>> parent of e07a703 (d)
         
         if filled_docx:
             # 确保文件名安全
@@ -656,11 +705,14 @@ def page_calendar():
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key="download_filled_docx"  # 唯一 key
             )
+<<<<<<< HEAD
         else:
             st.error("模板渲染失败，请检查数据和模板格式。")
 
 
 
+=======
+>>>>>>> parent of e07a703 (d)
         
 def page_program():
     nav_bar(show_back=True)
