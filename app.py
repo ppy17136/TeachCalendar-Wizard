@@ -333,44 +333,58 @@ def page_syllabus():
 
 import os
 import io
+import json
+import re
 import streamlit as st
 from docx import Document
-from docx.shared import Pt
+from docxtpl import DocxTemplate  # 必须安装 docxtpl
 
-# ==================== 1. 辅助读取函数 ====================
+# ==================== 1. 核心渲染与辅助函数 ====================
 
-def read_local_docx(file_path):
-    """读取本地预设的 docx 模版文件内容"""
+def read_local_docx_structure(file_path):
+    """读取本地模版文字，供 AI 学习标签位置"""
     if not os.path.exists(file_path):
-        return f"错误：模版文件 {file_path} 不存在，请检查根目录文件名。"
+        return f"错误：文件 {file_path} 不存在。"
     try:
         doc = Document(file_path)
-        # 提取所有段落和表格中的文字，以便 AI 学习结构
-        content = []
-        for p in doc.paragraphs:
-            if p.text.strip():
-                content.append(p.text)
-        for table in doc.tables:
-            for row in table.rows:
-                row_text = [cell.text.strip() for cell in row.cells]
-                content.append(" | ".join(row_text))
-        return "\n".join(content)
+        return "\n".join([p.text for p in doc.paragraphs if "{{" in p.text])
+    except:
+        return "模版读取失败"
+
+def render_calendar_docx(template_path, json_str):
+    """
+    真正的填充逻辑：复制模版 -> 注入数据 -> 输出二进制流
+    """
+    try:
+        # 1. 清洗 AI 可能输出的 Markdown 代码块标记
+        clean_json = re.sub(r'```json\s*|\s*```', '', json_str).strip()
+        data = json.loads(clean_json)
+        
+        # 2. 加载模版 (支持路径或文件流)
+        doc = DocxTemplate(template_path)
+        
+        # 3. 渲染数据 (数据字典键值需与模版 {{标签}} 一一对应)
+        doc.render(data)
+        
+        # 4. 保存到内存流
+        target_stream = io.BytesIO()
+        doc.save(target_stream)
+        return target_stream.getvalue()
     except Exception as e:
-        return f"本地模版解析失败: {str(e)}"
+        st.error(f"模版填充失败: {str(e)}")
+        return None
 
 # ==================== 2. 教学日历模块页面 ====================
 
 def page_calendar():
     nav_bar(show_back=True)
-    st.subheader("📅 智能生成教学日历 (多模版自动适配)")
+    st.subheader("📅 智能填充教学日历 (基于 docxtpl 模版技术)")
     
-    # --- 1. 基础参数设置 ---
+    # --- 1. 基础参数与状态同步 ---
     col_u1, col_u2, col_u3 = st.columns(3)
-    # 同步大纲模块的缓存数据 [cite: 11, 14]
     name = col_u1.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
     try:
-        # 默认值参考原件数据 [cite: 15]
         default_hours = int(st.session_state.get('total_hours', 32))
     except:
         default_hours = 32
@@ -378,92 +392,98 @@ def page_calendar():
     total_hours = col_u2.number_input("总学时", value=default_hours)
     total_weeks = col_u3.number_input("总周数", value=16)  
     
-    # --- 2. 模版选择逻辑 ---
+    # --- 2. 模版选择 ---
     st.divider()
     t_col1, t_col2 = st.columns([1, 2])
-    
     with t_col1:
         template_choice = st.selectbox(
-            "选择教学日历模版", 
-            ["辽宁石油化工大学模版", "通用模版", "上传自定义模版"],
-            help="选择系统预设模版或上传您自己的 .docx 模版"
+            "选择要填充的模版", 
+            ["辽宁石油化工大学模版", "通用模版", "上传自定义模版"]
         )
     
-    template_ctx = ""
+    # 确定物理模版路径
+    current_template_path = ""
+    template_desc = ""
+    
     if template_choice == "上传自定义模版":
-        template_file = st.file_uploader("上传自定义 .docx 模版", type=["docx"])
-        if template_file:
-            template_ctx = safe_extract_text(template_file)
+        custom_file = st.file_uploader("上传您的 .docx 模版", type=["docx"])
+        if custom_file:
+            current_template_path = custom_file # docxtpl 可以直接接受文件流
+            template_desc = "自定义模版"
     elif template_choice == "通用模版":
-        # 预设文件名：template_general.docx 
-        template_ctx = read_local_docx("template_general.docx")
+        current_template_path = "template_general.docx"
+        template_desc = read_local_docx_structure(current_template_path)
     else:
-        # 预设文件名：template_lnpu.docx 
-        template_ctx = read_local_docx("template_lnpu.docx")
+        current_template_path = "template_lnpu.docx"
+        template_desc = read_local_docx_structure(current_template_path)
 
-    # --- 3. 资料关联 ---
-    st.markdown("##### 📚 关联教学资料")
+    # --- 3. 数据来源关联 ---
+    st.markdown("##### 📚 数据提取来源")
     col_u4, col_u5 = st.columns(2)
     syllabus_file = col_u4.file_uploader("上传教学大纲 (可选)", type=['pdf', 'docx'])
-    plan_file = col_u5.file_uploader("上传人才培养方案 (可选)", type=["pdf", "docx"])
-
-    if st.button("🚀 依据所选模版生成教学日历"):
-        if not template_ctx or "错误" in template_ctx:
-            st.error(f"⚠️ 模版载入失败：{template_ctx if template_ctx else '请先上传或选择模版'}")
+    
+    if st.button("🚀 提取大纲数据并填充模版"):
+        if not current_template_path:
+            st.error("请先指定有效的模版文件")
             return
 
-        with st.spinner(f"正在分析【{template_choice}】并填充内容..."):
-            # 资料优先级判断
+        with st.spinner("AI 正在解析大纲并构建填充数据集..."):
+            # 获取上下文资料
+            syl_ctx = ""
             if syllabus_file:
                 syl_ctx = safe_extract_text(syllabus_file)
             elif st.session_state.get("gen_content", {}).get("syllabus"):
                 syl_ctx = st.session_state.gen_content["syllabus"]
             else:
-                syl_ctx = "未提供大纲，请基于专业常识和课程名补全内容。"
+                syl_ctx = "未提供具体大纲，请按常识生成标准数据。"
 
-            # 构建增强版 Prompt
+            # 关键：要求 AI 输出 JSON 字典，以便直接注入 docxtpl
             final_prompt = f"""
-            你是一位精通教务排版的专家。请严格基于提供的【教学大纲】，将内容填充进{template_ctx}的结构中。
-            
-            **输出规范：**
-            1. **禁止**输出任何开场白（如“好的”、“这是为您生成的...”）。
-            2. **必须直接**以“# 《{name}》教学日历”开头。
-            3. **结构复刻**：模版中的所有表格（基本信息表 、教材表、进度表 、签字区）必须按原样用 Markdown 表格形式输出。
-            
-            **填充细节：**
-            - 课程基本信息：包含 {name}、适用专业及年级、教师职称等。
-            - 教学进度主表：必须包含 周次、课次、教学内容、重点要求、学时、方法、支撑目标等列。
-            - 总学时：必须为 {total_hours}，总周数：{total_weeks}。
-            - 签字位置：保留“系主任”、“主管领导”等占位符。
+            你是一个教学数据处理专家。请阅读【教学大纲】，将其内容转化为一个 JSON 字典。
+            这个字典的键名（Key）必须严格匹配以下【模版标签】。
 
-            **参考模版结构：**
-            {template_ctx[:3500]}
+            **必须提取并填充的标签清单：**
+            - academic_year (如 2024—2025), semester (如 1)
+            - course_name (填充 {name}), class_info (专业年级)
+            - teacher_name, teacher_title
+            - total_hours (必须为 {total_hours}), term_hours, total_weeks (必须为 {total_weeks}), weekly_hours
+            - textbook_name, publisher, publish_date, textbook_remark
+            - assessment_method, grading_formula, sign_date_1
+            - schedule: 这是一个列表，包含每一课次的: week, sess, content, req, hrs, method, other, obj
 
-            **参考大纲内容：**
-            {syl_ctx[:7000]}
+            **约束条件：**
+            1. 只输出纯 JSON 字符串，不要任何多余描述。
+            2. 确保 JSON 结构合法，不要截断。
+            3. 参考大纲内容：{syl_ctx[:8000]}
             """
 
-            # 调用 AI 生成
-            res = ai_generate(final_prompt, engine_id, selected_model)
-            st.session_state.generated_calendar = res
-            st.success(f"✅ 已完成【{template_choice}】内容填充")
-            st.rerun()
+            # 调用 AI 引擎提取 JSON
+            json_res = ai_generate(final_prompt, engine_id, selected_model)
+            
+            # 将生成的 JSON 和模版路径存入缓存，供下载调用
+            st.session_state.generated_json_data = json_res
+            st.session_state.active_template_path = current_template_path
+            
+            st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")
 
-    # --- 4. 展示与下载 ---
-    calendar_content = st.session_state.get("generated_calendar")
-    if calendar_content:
-        st.markdown("---")
-        with st.container(border=True):
-            st.markdown(calendar_content)
+    # --- 4. 预览与下载 ---
+    if st.session_state.get("generated_json_data"):
+        with st.expander("🔍 查看 AI 提取的填充数据"):
+            st.code(st.session_state.generated_json_data, language="json")
         
-        # 将生成的 Markdown 内容转换为下载文件
-        doc_file = create_docx(calendar_content)
-        st.download_button(
-            label="💾 下载已填充的 Word 日历",
-            data=doc_file,
-            file_name=f"{name}_教学日历.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # 执行填充并提供下载
+        filled_docx = render_calendar_docx(
+            st.session_state.active_template_path, 
+            st.session_state.generated_json_data
         )
+        
+        if filled_docx:
+            st.download_button(
+                label="💾 点击下载已自动填充的模版文件 (.docx)",
+                data=filled_docx,
+                file_name=f"{name}_填充版教学日历.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
         
 def page_program():
     nav_bar(show_back=True)
