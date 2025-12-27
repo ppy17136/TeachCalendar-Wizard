@@ -512,7 +512,7 @@ def page_calendar():
             st.download_button(
                 label="💾 点击下载已自动填充的模版文件 (.docx)",
                 data=filled_docx,
-                file_name=f"{name}_填充版教学日历.docx",
+                file_name=f"{course_name}_填充版教学日历.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ) 
         
