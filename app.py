@@ -450,7 +450,7 @@ def page_calendar():
             
             # 数据字典映射指南 (JSON Keys)
             1. 基础信息：
-               - school_name: 默认为“辽宁石油化工大学”（大纲有特定信息则按大纲{syl_ctx}）
+               - school_name: {school_name}
                - academic_year (学年)（如2025-2026）, semester (学期)（如1，即这一学年的第一学期，通常在每年的8月末开始）
                - course_name (课程名称), class_info (学生专业及年级)（如材料成型及控制工程 22级）
                - teacher_name (主讲教师姓名), teacher_title (职称)
