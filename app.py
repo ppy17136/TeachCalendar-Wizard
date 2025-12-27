@@ -441,7 +441,7 @@ def page_calendar():
             你是一位资深高校教务专家，精通 OBE（成果导向教育）理念及高校教学管理规范。你的任务是深度解析【教学大纲{syl_ctx}】内容，并将其精确填充到【教学日历模板{template_desc}】的标签体系中。
 
             # 核心准则
-            1. 纲领性原则：教学大纲是授课安排的唯一法律依据，所有教学内容、学时分配和考核方式必须严格遵循大纲原文。
+            1. 纲领性原则：教学大纲{syl_ctx}是授课安排的唯一法律依据，所有教学内容、学时分配和考核方式必须严格遵循大纲{syl_ctx}原文。
             2. 逻辑一致性：教学进度表（schedule）中的“学时”总和必须精确等于总学时 {total_hours}。
 
             # 任务目标
@@ -449,13 +449,13 @@ def page_calendar():
             
             # 数据字典映射指南 (JSON Keys)
             1. 基础信息：
-               - school_name: 默认为“辽宁石油化工大学”（大纲有特定信息则按大纲）
+               - school_name: 默认为“辽宁石油化工大学”（大纲有特定信息则按大纲{syl_ctx}）
                - academic_year (学年), semester (学期)
                - course_name (课程名称), class_info (学生专业及年级)
                - teacher_name (主讲教师姓名), teacher_title (职称)
                - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
 
-            2. 教材与考核：
+            2. 教材与考核：（遵照大纲{syl_ctx}）
                - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
                - references: 参考书目列表
                - assessment_method (考核方式), grading_formula (成绩计算方法)
@@ -466,10 +466,10 @@ def page_calendar():
 
             4. 教学进度主表 (Key: "schedule"，列表对象)：
                - 每个对象必须包含以下键：
-                 - week: 周次（数字序列 1, 2, 3...）
-                 - sess: 课次（数字序列 1, 2, 3...）
-                 - content: 教学内容（严格按大纲章节标题）
-                 - req: 学习重点、教学要求
+                 - week: 周次（数字序列 1, 2, 3...），就是开学后的第一周、第二周、……
+                 - sess: 课次（数字序列 1, 2, 3...），实际上就是第1次课，第2次课，……
+                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题）
+                 - req: 学习重点、教学要求（一定要严格遵照大纲{syl_ctx}）
                  - hrs: 该课次学时
                  - method: 教学方法
                  - other: 其它（作业、习题、实验等）
