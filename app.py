@@ -457,9 +457,9 @@ def page_calendar():
                - total_hours (课程总学时), term_hours (本学期总学时), lecture_hours (讲课学时), total_weeks (上课周数), lab_hours (实验学时), weekly_hours (周学时), quiz_hours (测验学时), course_nature (课程性质), extra_hours (课外学时)
 
             2. 教材与考核：（如果大纲中有相关信息，遵照大纲{syl_ctx}）
-               - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)
-               - references: 参考书目列表
-               - assessment_method (考核方式)（如考试或考查）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
+               - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)（对应教学大纲{syl_ctx}中的建议教材）
+               - references: 参考书目列表（对应教学大纲{syl_ctx}中的参考资料）
+               - assessment_method (考核方式)（如考试或考查）（对应教学大纲中的考核方式）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
 
             3. 签字与备注：
                - sign_date_1, sign_date_2, sign_date_3 (日期占位)
@@ -469,8 +469,8 @@ def page_calendar():
                - 每个对象必须包含以下键：
                  - week: 周次（数字序列 1, 2, 3...），就是开学后的第一周、第二周、……
                  - sess: 课次（数字序列 1, 2, 3...），实际上就是第1次课，第2次课，……
-                 - content: 教学内容（一定要严格按大纲{syl_ctx}章节标题安排）
-                 - req: 学习重点、教学要求（一定要遵照大纲{syl_ctx}）
+                 - content: 教学内容（对应教学大纲{syl_ctx}中的教学内容	）
+                 - req: 学习重点、教学要求（对应教学大纲{syl_ctx}中的学生学习预期成果）
                  - hrs: 该课次学时
                  - method: 教学方法
                  - other: 其它（作业、习题、实验等）
