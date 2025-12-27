@@ -358,8 +358,84 @@ def clean_none(obj):
         return [clean_none(x) for x in obj]
     return "" if obj is None else obj
 
+
+from docx import Document
+from docx.shared import Inches, Pt
+import zipfile
+import tempfile
+import os
+
+def create_fixed_template_from_xml():
+    """从正确的 XML 创建模板文件"""
+    # 使用你提供的正确 XML
+    correct_xml = '''<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mo="http://schemas.microsoft.com/office/mac/office/2008/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:mv="urn:schemas-microsoft-com:mac:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 wp14"><w:body><w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>教学日历</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>一、课程基本信息</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:type="auto" w:w="0"/><w:tblLook w:firstColumn="1" w:firstRow="1" w:lastColumn="0" w:lastRow="0" w:noHBand="0" w:noVBand="1" w:val="04A0"/></w:tblPr><w:tblGrid><w:gridCol w:w="4320"/><w:gridCol w:w="4320"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>内容</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>课程名称</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{course_name}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>英文名称</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{english_name}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>课程编码</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{course_code}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>总学时</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{total_hours}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>学分数</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{credits}}</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>开课学期</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="4320"/></w:tcPr><w:p><w:r><w:t>{{semester}}</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>二、教学日历</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:type="auto" w:w="0"/><w:tblLook w:firstColumn="1" w:firstRow="1" w:lastColumn="0" w:lastRow="0" w:noHBand="0" w:noVBand="1" w:val="04A0"/></w:tblPr><w:tblGrid><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/><w:gridCol w:w="1234"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>周次</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>课次</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>教学内容</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>学习重点</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>学时</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>教学方法</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>支撑目标</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{% for s in schedule %}{{ s.week_num }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.session_num }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.teaching_content }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.learning_focus }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.hours }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.teaching_method }}</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:tcW w:type="dxa" w:w="1234"/></w:tcPr><w:p><w:r><w:t>{{ s.objective }}{% endfor %}</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>说明：</w:t></w:r></w:p><w:p><w:r><w:t>1. 表格中的 {{标签}} 将在填充时被替换为实际内容</w:t></w:r></w:p><w:p><w:r><w:t>2. 如需多行数据，请在Word中复制表格行</w:t></w:r></w:p><w:p><w:r><w:t>3. 标签命名建议使用英文和下划线，如：{{teacher_name}}</w:t></w:r></w:p><w:sectPr w:rsidR="00FC693F" w:rsidRPr="0006063C" w:rsidSect="00034616"><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1800" w:bottom="1440" w:left="1800" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>'''
+    
+    # 创建临时目录
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # 创建基本目录结构
+        word_dir = os.path.join(tmp_dir, "word")
+        rels_dir = os.path.join(word_dir, "_rels")
+        os.makedirs(rels_dir, exist_ok=True)
+        
+        # 保存 document.xml
+        xml_path = os.path.join(word_dir, "document.xml")
+        with open(xml_path, "w", encoding="utf-8") as f:
+            f.write(correct_xml)
+        
+        # 创建简单的 _rels 文件
+        rels_content = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>'''
+        
+        rels_path = os.path.join(rels_dir, "document.xml.rels")
+        with open(rels_path, "w", encoding="utf-8") as f:
+            f.write(rels_content)
+        
+        # 创建简单的 styles.xml
+        styles_content = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<docDefaults><rPrDefault><rPr><rFonts ascii="Times New Roman" eastAsia="宋体" hAnsi="Times New Roman"/><sz w:val="24"/></rPr></rPrDefault></docDefaults>
+<latentStyles count="267" defLockedState="0" defUIPriority="99" defSemiHidden="0" defUnhideWhenUsed="0" defQFormat="0">
+<lsdException locked="0" name="Normal" priority="0" qFormat="1"/>
+<lsdException locked="0" name="Heading1" priority="9" qFormat="1"/>
+<lsdException locked="0" name="Title" priority="10" qFormat="1"/>
+</latentStyles>
+</styleSheet>'''
+        
+        styles_path = os.path.join(word_dir, "styles.xml")
+        with open(styles_path, "w", encoding="utf-8") as f:
+            f.write(styles_content)
+        
+        # 创建 [Content_Types].xml
+        content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>'''
+        
+        content_types_path = os.path.join(tmp_dir, "[Content_Types].xml")
+        with open(content_types_path, "w", encoding="utf-8") as f:
+            f.write(content_types)
+        
+        # 打包为 docx
+        output_path = "template_fixed.docx"
+        with zipfile.ZipFile(output_path, "w") as zipf:
+            for root, dirs, files in os.walk(tmp_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, tmp_dir)
+                    zipf.write(file_path, arcname)
+        
+        print(f"✅ 已创建正确的模板: {output_path}")
+        return output_path
 def render_calendar_docx(template_path, json_str):
     try:
+        st.info(f"正在渲染模板: {template_path}")
+        
         # 1) 提取最外层 JSON
         match = re.search(r'\{.*\}', json_str, re.DOTALL)
         if not match:
@@ -373,6 +449,20 @@ def render_calendar_docx(template_path, json_str):
 
         if "schedule" not in data or not isinstance(data["schedule"], list):
             data["schedule"] = []
+            
+        # 显示数据预览
+        with st.expander("🔍 查看渲染数据"):
+            st.json(data)
+            st.write(f"schedule 列表长度: {len(data.get('schedule', []))}")
+
+        # 检查模板路径
+        if isinstance(template_path, str):
+            if not os.path.exists(template_path):
+                st.error(f"模板文件不存在: {template_path}")
+                return None
+        else:
+            # template_path 可能是文件流
+            pass
 
         doc = DocxTemplate(template_path)
         doc.render(data, autoescape=True)
@@ -383,13 +473,33 @@ def render_calendar_docx(template_path, json_str):
 
         # docx 必须是 zip，开头一般是 PK
         if not out.startswith(b"PK"):
-            raise ValueError("渲染输出不是合法 docx（zip 头不是 PK）")
+            st.error("渲染输出不是合法 docx（zip 头不是 PK）")
+            # 保存错误文件供调试
+            with open("error_output.bin", "wb") as f:
+                f.write(out)
+            return None
 
+        st.success("✅ 模板渲染成功！")
         return out
 
+    except json.JSONDecodeError as e:
+        st.error(f"JSON 解析错误: {str(e)}")
+        st.error(f"JSON 内容: {json_str[:500]}...")
+        return None
     except Exception as e:
-        st.error("模板渲染失败，未生成有效 docx。请看下面的报错信息：")
+        st.error("模板渲染失败，请看下面的报错信息：")
         st.exception(e)
+        
+        # 尝试保存模板供调试
+        try:
+            if isinstance(template_path, str):
+                with open("debug_template.docx", "wb") as f:
+                    with open(template_path, "rb") as src:
+                        f.write(src.read())
+            st.info("模板已保存为 debug_template.docx 供调试")
+        except:
+            pass
+            
         return None
 
 
