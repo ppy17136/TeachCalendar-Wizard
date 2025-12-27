@@ -369,7 +369,32 @@ def render_calendar_docx(template_path, json_str):
     except Exception as e:
         st.error(f"模版填充失败: {str(e)}")
         return None
-
+def render_calendar_docx(template_path, json_str):
+    try:
+        # 1. 深度清洗 AI 输出，剔除所有 Markdown 杂质
+        # 有时 AI 会在 JSON 前后加文字，这里只截取 {} 之间的内容
+        match = re.search(r'(\{.*\}|\[.*\])', json_str, re.DOTALL)
+        if match:
+            clean_json = match.group(1)
+        else:
+            clean_json = json_str
+            
+        data = json.loads(clean_json)
+        
+        # 2. 确保必要的键存在，防止渲染崩溃
+        if "schedule" not in data:
+            data["schedule"] = []
+            
+        # 3. 渲染
+        doc = DocxTemplate(template_path)
+        # 关键：使用 jinja_env 显式允许 tr 标签
+        doc.render(data)
+        
+        target_stream = io.BytesIO()
+        doc.save(target_stream)
+        return target_stream.getvalue()
+    except Exception as e:
+        return f"ERROR_RENDER:{str(e)}"
 # ==================== 2. 教学日历模块页面 ====================
 
 def page_calendar():
