@@ -352,21 +352,17 @@ def read_local_docx_structure(file_path):
         return "模版读取失败"
 
 def render_calendar_docx(template_path, json_str):
-    """
-    真正的填充逻辑：复制模版 -> 注入数据 -> 输出二进制流
-    """
     try:
-        # 1. 清洗 AI 可能输出的 Markdown 代码块标记
         clean_json = re.sub(r'```json\s*|\s*```', '', json_str).strip()
         data = json.loads(clean_json)
         
-        # 2. 加载模版 (支持路径或文件流)
+        # --- 新增：确保 schedule 键存在，防止 's' is undefined 报错 ---
+        if "schedule" not in data:
+            data["schedule"] = [] 
+            
         doc = DocxTemplate(template_path)
-        
-        # 3. 渲染数据 (数据字典键值需与模版 {{标签}} 一一对应)
         doc.render(data)
         
-        # 4. 保存到内存流
         target_stream = io.BytesIO()
         doc.save(target_stream)
         return target_stream.getvalue()
@@ -450,12 +446,20 @@ def page_calendar():
             - textbook_name, publisher, publish_date, textbook_remark
             - assessment_method, grading_formula, sign_date_1
             - schedule: 这是一个列表，包含每一课次的: week, sess, content, req, hrs, method, other, obj
+            
+            **结构要求：**
+            - 进度表必须是一个名为 "schedule" 的数组。
+            - 数组中的每个对象必须包含键：week, sess, content, req, hrs, method, other, obj。
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
             2. 确保 JSON 结构合法，不要截断。
             3. 参考大纲内容：{syl_ctx[:8000]}
             """
+
+
+
+
 
             # 调用 AI 引擎提取 JSON
             json_res = ai_generate(final_prompt, engine_id, selected_model)
@@ -468,8 +472,13 @@ def page_calendar():
 
     # --- 4. 预览与下载 ---
     if st.session_state.get("generated_json_data"):
-        with st.expander("🔍 查看 AI 提取的填充数据"):
-            st.code(st.session_state.generated_json_data, language="json")
+        # 增加一个明显的调试标识
+        st.info("🛠️ 调试模式：请检查下方 JSON 标签是否与模板 {{ 标签 }} 一一对应")
+        
+        with st.expander("🔍 查看 AI 提取的填充数据（JSON 格式）", expanded=True):
+            st.code(st.session_state.generated_json_data, language="json")            
+            
+            
         
         # 执行填充并提供下载
         filled_docx = render_calendar_docx(
