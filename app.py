@@ -441,8 +441,26 @@ def page_calendar():
             这个字典的键名（Key）必须严格匹配以下【模版标签】{template_desc}。
 
             **必须提取并填充的标签清单：**
-            - schedule: 这是一个列表，包含每一课次的内容: {{week}}	{{sess}}	{{content}}	{{req}}	{{hrs}}	{{method}}	{{other}}	{{obj}}
+            - schedule: 这是一个列表，包含每一课次的内容: {{week}}	{{sess}} {{content}} {{req}} {{hrs}} {{method}}	{{other}} {{obj}}
             - 进度表数据必须放在键名为 "schedule" 的数组中。
+            课程名称	{{ course_name }}
+            学生专业及年级	{{ class_info }}
+            主讲教师姓名	{{ teacher_name }}   职称{{ teacher_title }}
+            课程总学时数	{{ total_hours }}	
+            本学期总学时数	{{ term_hours }}	
+            讲课学时	{{ lecture_hours }}
+            本学期上课周数	{{ total_weeks }}	
+            实验学时	{{ lab_hours }}
+            平均每周学时数	{{ weekly_hours }}	
+            测验学时	{{ quiz_hours }}
+            课程性质	{{ course_nature }}	
+            课外学时	{{ extra_hours }}
+            学校名称{{ school_name }}
+            使用教材名称{{ textbook_name }}	出版社	{{ publisher }}	出版时间{{ publish_date }}	获奖情况{{ textbook_remark }}
+            参考书目references
+            考核方式	{{ assessment_method }}	
+            成绩计算方法	{{ grading_formula }}
+
 
             **约束条件：**
             1. 只输出纯 JSON 字符串，不要任何多余描述。
