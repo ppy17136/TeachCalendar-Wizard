@@ -175,16 +175,25 @@ def safe_extract_text(file, max_chars=15000):
             doc = Document(file)
             # 1. 提取普通段落
             for p in doc.paragraphs:
-                if p.text.strip():
-                    text_list.append(p.text)
+                if p.text.strip(): text_list.append(p.text)
             
-            # 2. 关键：提取表格内容 (这是您目前缺失的)
+            # 2. 增强型表格提取：识别复选框符号
             for table in doc.tables:
                 for row in table.rows:
-                    # 将一行中的单元格用空格或竖线隔开，模拟表格结构
-                    row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    if row_text:
-                        text_list.append(" | ".join(row_text))
+                    processed_cells = []
+                    for cell in row.cells:
+                        content = cell.text
+                        # 核心逻辑：将 Word 常见的复选框符号映射为文字，让 AI “看见”打勾
+                        # ☑ (U+2611), þ (Wingdings 中的选中), [x] 等
+                        if '☑' in content or '\xfe' in content or 'þ' in content:
+                            content = content.replace('☑', '[已选中]').replace('þ', '[已选中]')
+                        elif '☐' in content or '\xa8' in content:
+                            content = content.replace('☐', '[未选中]')
+                        
+                        processed_cells.append(content.strip())
+                    
+                    row_text = [c for c in processed_cells if c]
+                    if row_text: text_list.append(" | ".join(row_text))
             
             return "\n".join(text_list)[:max_chars]
             
