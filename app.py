@@ -16,6 +16,7 @@ from PIL import Image
 import google.generativeai as genai
 import json
 from docxtpl import DocxTemplate  # 必须安装 docxtpl
+from datetime import datetime
 
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
@@ -405,20 +406,26 @@ def page_calendar():
     st.subheader("📅 智能填充教学日历 (基于 docxtpl 模版技术)")
     
     # --- 1. 基础参数与状态同步 ---
-    col_u1, col_u2, col_u3, col_u4, col_u5 = st.columns(5)
-    school_name=col_u1.text_input("学校名称", value="辽宁石油化工大学")
-    course_name = col_u2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
+    # 第一行：课程与学校信息
+    c1, c2, c3 = st.columns([1.5, 2, 1.5])
+    school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
+    course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
-    try:
-        default_hours = int(st.session_state.get('total_hours', 24))
-    except:
-        default_hours = 24
-        
-    total_hours = col_u3.number_input("总学时", value=default_hours)
-    total_weeks = col_u4.number_input("总周数", value=12)  
+    # 获取当前系统日期
+    now = datetime.now()
+    today_str = now.strftime("%Y年 %m月 %d日")
+    
+    # 第二行：教师信息（新增添加项）与日期
+    t1, t2, t3 = st.columns(3)
+    teacher_name = t1.text_input("主讲教师姓名", value=st.session_state.get('teacher_name', "张三"))
+    teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', "副教授"))
+    # 日期作为只读显示，确保用户知情
+    st.info(f"📅 自动生成的签名日期：{today_str}")
 
-    
-    # 🌟 新增：手动选择考核方式，默认为大纲中录入的值或“考查”
+    # 第三行：学时与考核方式 (改为水平排列)
+    col_u3, col_u4, col_u5 = st.columns(3)
+    total_hours = col_u3.number_input("总学时", value=int(st.session_state.get('total_hours', 24)))
+    total_weeks = col_u4.number_input("总周数", value=12)
     current_assessment = col_u5.radio(
         "考核方式", 
         ["考试", "考查"], 
@@ -515,6 +522,14 @@ def page_calendar():
                  - other: 其它（作业、习题、实验等）
                  - obj: 支撑教学目标（如课程目标1，不要写具体内容）
 
+            # 强制注入参数 (必须填入对应的 Key 中)：
+            - teacher_name: "{teacher_name}"
+            - teacher_title: "{teacher_title}"
+            - sign_date_1: "{today_str}" (这是主讲教师的签名日期)
+            - assessment_method: "{current_assessment}"
+
+
+
             # 撰写与生成逻辑
             - 学时分配：参照大纲“教学内容与学时分配”部分，将学时平摊至每一课次，注意，大纲中的课程内容可能要进行分解，确保 schedule 列表总学时 = {total_hours}。
             
@@ -536,11 +551,26 @@ def page_calendar():
             # 调用 AI 引擎提取 JSON
             json_res = ai_generate(final_prompt, engine_id, selected_model)
             
-            # 将生成的 JSON 和模版路径存入缓存，供下载调用
-            st.session_state.generated_json_data = json_res
-            st.session_state.active_template_path = current_template_path
-            
-            st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")
+            # --- 终极保底覆盖：确保界面值 100% 生效 ---
+            try:
+                match = re.search(r'\{.*\}', json_res, re.DOTALL)
+                data = json.loads(match.group(0))
+                
+                # 覆盖 AI 可能识别错的字段
+                data['teacher_name'] = teacher_name
+                data['teacher_title'] = teacher_title
+                data['sign_date_1'] = today_str
+                data['assessment_method'] = current_assessment
+                data['school_name'] = school_name
+                
+          
+                # 将生成的 JSON 和模版路径存入缓存，供下载调用
+                st.session_state.generated_json_data = json_res
+                st.session_state.active_template_path = current_template_path
+                
+                st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")            
+            except:
+                st.session_state.generated_json_data = json_res                   
 
     # --- 4. 预览与下载 ---
     if st.session_state.get("generated_json_data"):
