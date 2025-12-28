@@ -479,7 +479,7 @@ def page_calendar():
             2. 教材与考核：（如果大纲中有相关信息，遵照大纲{syl_ctx}）
                - textbook_name (教材名), publisher (出版社), publish_date (出版时间), textbook_remark (获奖情况)（对应教学大纲{syl_ctx}中的建议教材）
                - references: 参考书目列表（对应教学大纲{syl_ctx}中的参考资料）
-               - assessment_method (考核方式)（如考试或考查）（对应教学大纲中的考核方式）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
+               - assessment_method (考核方式)（如考试或考查）（对应教学大纲{syl_ctx}中的考核方式）, grading_formula (成绩计算方法)（列公式或简略描述，如总成绩=平时成绩30%+考试成绩70%）
 
             3. 签字与备注：
                - sign_date_1, sign_date_2, sign_date_3 (日期占位)
