@@ -402,87 +402,82 @@ def render_calendar_docx(template_path, data_dict, sig_images=None):
 
 # --- 教师视图：编报与拆分 ---
 def render_teacher_view():
-    st.markdown("#### 📝 教师端：教学日历编报")
+    st.markdown("#### 📝 教师端：日历编报与原文对照")
     
-    # --- 1. 基础信息配置 (全部项显示) ---
+    # 1. 基础信息配置 (全项列出)
     with st.container(border=True):
-        st.markdown("##### 👤 基础参数设置")
+        st.markdown("##### 👤 1. 基础信息设置")
         c1, c2, c3 = st.columns([1.5, 2, 1.5])
         school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
-        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
-        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
+        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
         
-        t1, t2, t3, t4 = st.columns(4)
-        teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
+        # 自动日期
+        today_str = datetime.now().strftime("%Y年 %m月 %d日")
+        
+        t1, t2, t3 = st.columns(3)
+        teacher_name = t1.text_input("主讲教师姓名", value=st.session_state.get('teacher_name', ""))
         teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
-        academic_year = t3.text_input("学年", value="2023-2024")
-        semester = t4.selectbox("学期", ["1", "2"])
+        st.info(f"📅 签名日期：{today_str}")
 
-        h1, h2, h3, h4 = st.columns(4)
+        h1, h2, h3 = st.columns(3)
         total_hours = h1.number_input("总学时", value=int(st.session_state.get('total_hours', 24)))
         total_weeks = h2.number_input("总周数", value=12)
-        course_nature = h3.text_input("课程性质", value="专业核心课")
-        current_assessment = h4.radio("考核方式", ["考试", "考查"], horizontal=True, 
+        current_assessment = h3.radio("考核方式", ["考试", "考查"], horizontal=True, 
                                      index=1 if st.session_state.get('assessment_method') == "考查" else 0)
 
-    # --- 2. 签名管理 ---
+    # 2. 签名管理
     with st.expander("✍️ 电子签名管理"):
         sig_col1, sig_col2 = st.columns(2)
-        use_saved = sig_col1.checkbox("使用系统预存签名", value=True)
+        use_saved = sig_col1.checkbox("使用预存签名", value=True)
         teacher_sig_file = None
         if not use_saved:
-            teacher_sig_file = sig_col2.file_uploader("上传个人手写签名", type=['png', 'jpg'], key="t_sig_up")
+            teacher_sig_file = sig_col2.file_uploader("上传手写签名图片", type=['png', 'jpg'], key="t_sig")
         else:
-            st.info("已自动关联系统预存教师签名。")
+            st.caption("已关联默认签名：teacher_sig.png")
 
-    # --- 3. 进度表编辑与原文对照 ---
+    # 3. 智能抽取与学时拆分
     st.divider()
-    st.markdown("##### 🗓️ 进度安排编辑")
-    syllabus_file = st.file_uploader("上传新大纲以更新内容 (可选)", type=['docx', 'pdf'])
+    st.markdown("##### 🗓️ 2. 进度表编辑 (支持 OBE 逻辑拆分)")
+    syllabus_file = st.file_uploader("上传新教学大纲 (可选)", type=['docx', 'pdf'])
     
-    if st.button("🪄 从大纲抽取并执行 OBE 逻辑拆分"):
-        with st.spinner("正在解析大纲并进行学时拆分..."):
+    if st.button("🪄 依据大纲抽取进度 (学时 > 2 自动拆分)"):
+        with st.spinner("正在对齐大纲与课次..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
-            # 强制 AI 执行学时拆分逻辑 [cite: 7]
-            split_prompt = f"""
+            prompt = f"""
             解析大纲内容：{syl_ctx[:8000]}
-            生成教学日历 JSON 列表。
-            **强制逻辑约束**：
-            1. 总周数为 {total_weeks}。若大纲中某教学模块学时 > 2，必须拆分为连续课次。例如：模块4共4学时，拆分为“模块4 (1/2)”2学时和“模块4 (2/2)”2学时。
-            2. 必须包含字段 "source_text"，存入该项对应的大纲原文片段。
-            JSON 键名：week, sess, content, req, hrs, method, other, obj, source_text
+            生成 JSON 列表。要求：
+            1. 若某模块学时 > 2，必须拆分为连续行。如 4 学时拆为“模块X(1/2)”2学时和“模块X(2/2)”2学时。
+            2. 必须包含 source_text 字段，存入该项对应的大纲原文。
+            3. JSON 键：week, sess, content, req, hrs, method, other, obj, source_text
             """
-            json_res = ai_generate(split_prompt, engine_id, selected_model)
+            res = ai_generate(prompt, engine_id, selected_model)
             try:
-                st.session_state.calendar_data = json.loads(re.search(r'\[.*\]', json_res, re.DOTALL).group(0))
-            except: st.error("AI 抽取失败，请手动录入")
+                st.session_state.calendar_data = json.loads(re.search(r'\[.*\]', res, re.DOTALL).group(0))
+            except: st.error("AI 解析失败，请手动填写")
 
+    # 4. 可编辑表格
     if "calendar_data" in st.session_state:
-        # data_editor 允许每一项手动修改 [cite: 40]
         st.session_state.calendar_data = st.data_editor(
             st.session_state.calendar_data,
             column_config={
-                "source_text": st.column_config.TextColumn("📖 大纲依据", width="medium", disabled=True),
+                "source_text": st.column_config.TextColumn("📖 大纲原文依据", width="medium", help="此项内容抽取的原始文本"),
                 "content": st.column_config.TextColumn("教学内容", width="large"),
                 "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
             },
             num_rows="dynamic", use_container_width=True
         )
 
-    # --- 4. 提交审批 ---
+    # 5. 提交审批
     if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
-        # 封装最终数据包存入 session_state 供流转
-        st.session_state.pending_calendar = {
-            "school_name": school_name, "academic_year": academic_year, "semester": semester,
-            "course_name": course_name, "class_info": class_info, "teacher_name": teacher_name,
-            "teacher_title": teacher_title, "total_hours": total_hours, "term_hours": total_hours,
-            "total_weeks": total_weeks, "weekly_hours": total_hours // total_weeks,
-            "course_nature": course_nature, "assessment_method": current_assessment,
-            "schedule": st.session_state.calendar_data, "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
-        }
-        st.session_state.teacher_sig_img = teacher_sig_file
         st.session_state.calendar_status = "Pending_Head"
-        st.success("已提交至教研室主任审批！")
+        st.session_state.calendar_final_data = {
+            "school_name": school_name, "course_name": course_name, "teacher_name": teacher_name,
+            "teacher_title": teacher_title, "total_hours": total_hours, "total_weeks": total_weeks,
+            "assessment_method": current_assessment, "sign_date_1": today_str,
+            "schedule": st.session_state.calendar_data
+        }
+        st.session_state.teacher_sig = teacher_sig_file
+        st.success("已提交至系主任审批！")
 
 # --- 审批视图：流转控制 ---
 def render_approval_view(role):
@@ -524,56 +519,51 @@ def render_approval_view(role):
 # --- 主页面入口 ---
 def page_calendar():
     nav_bar(show_back=True)
-    st.subheader("📅 教学日历智造与审批流")
+    st.subheader("📅 教学日历全流程审批系统")
     
-    # 角色切换模拟
-    user_role = st.sidebar.selectbox("切换角色视图", ["授课教师", "系主任", "主管院长"])
+    user_role = st.sidebar.selectbox("切换当前角色", ["授课教师", "系主任", "主管院长"])
     
-    if user_role == "授课教师": render_teacher_view()
-    elif user_role == "系主任": render_approval_view("Head")
-    else: render_approval_view("Dean")
+    if user_role == "授课教师":
+        render_teacher_view()
+    elif user_role == "系主任":
+        render_approval_view("Department_Head")
+    else:
+        render_approval_view("Dean")
 
-    # --- 审批进度监控 ---
+    # --- 底部进度监控与下载 ---
     st.divider()
     status_map = {"Draft": 0, "Pending_Head": 33, "Pending_Dean": 66, "Approved": 100}
-    curr_status = st.session_state.get("calendar_status", "Draft")
-    st.progress(status_map.get(curr_status, 0))
+    curr_step = status_map.get(st.session_state.get("calendar_status", "Draft"), 0)
+    st.progress(curr_step)
     
-    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-    nodes = ["草拟中", "系主任审批", "院长审批", "完成"]
-    for i, node in enumerate(nodes):
-        if status_map.get(curr_status, 0) >= (i * 33):
-            (col_s1 if i==0 else col_s2 if i==1 else col_s3 if i==2 else col_s4).success(f"● {node}")
-        else:
-            (col_s1 if i==0 else col_s2 if i==1 else col_s3 if i==2 else col_s4).write(f"○ {node}")
+    # 审批过程显示
+    with st.expander("🚥 审批流转状态"):
+        st.write(f"**当前状态：** {st.session_state.get('calendar_status')}")
+        if "head_opinion" in st.session_state:
+            st.write(f"**系主任意见：** {st.session_state.head_opinion} ({st.session_state.head_date})")
+        if "dean_opinion" in st.session_state:
+            st.write(f"**院领导意见：** {st.session_state.dean_opinion} ({st.session_state.dean_date})")
 
-    # 审批结果显示
-    if curr_status != "Draft":
-        with st.expander("📋 查看历史审批意见"):
-            if "head_opinion" in st.session_state:
-                st.write(f"**系主任意见：** {st.session_state.head_opinion} ({st.session_state.get('head_date')})")
-            if "dean_opinion" in st.session_state:
-                st.write(f"**主管院长意见：** {st.session_state.dean_opinion} ({st.session_state.get('dean_date')})")
-
-    # 如果审批全部通过，提供盖章版下载 [cite: 43, 44]
-    if curr_status == "Approved":
+    # 最终下载
+    if st.session_state.get("calendar_status") == "Approved":
         st.balloons()
-        final_data = st.session_state.pending_calendar
-        # 整合意见和日期 
+        # 汇总所有签名和意见
+        final_data = st.session_state.calendar_final_data
         final_data.update({
-            "head_opinion": st.session_state.head_opinion, "sign_date_2": st.session_state.head_date,
-            "dean_opinion": st.session_state.dean_opinion, "sign_date_3": st.session_state.dean_date
+            "head_opinion": st.session_state.head_opinion, "head_date": st.session_state.head_date,
+            "dean_opinion": st.session_state.dean_opinion, "dean_date": st.session_state.dean_date
         })
         sig_map = {
-            "teacher_sign_img": st.session_state.teacher_sig_img,
-            "head_sign_img": st.session_state.head_sig_img,
-            "dean_sign_img": st.session_state.dean_sig_img
+            "teacher_sig": st.session_state.teacher_sig,
+            "head_sig": st.session_state.head_sig,
+            "dean_sig": st.session_state.dean_sig
         }
         
         doc_bytes = render_calendar_docx("template_lnpu.docx", final_data, sig_map)
         if doc_bytes:
             st.download_button("📥 下载完整审批版教学日历 (.docx)", data=doc_bytes, 
-                               file_name=f"{final_data['course_name']}_最终审批版.docx")
+                               file_name="已通过_教学日历.docx", use_container_width=True)
+        
   
 def page_program():
     nav_bar(show_back=True)
