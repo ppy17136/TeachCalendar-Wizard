@@ -353,28 +353,36 @@ def read_local_docx_structure(file_path):
     except:
         return "模版读取失败"
 
-
 def render_calendar_docx(template_path, json_str):
     try:
-        # 深度清洗 JSON：只保留 {} 之间的内容
+        # 1. 深度清洗 JSON 文本
         match = re.search(r'\{.*\}', json_str, re.DOTALL)
-        if not match:
-            return "ERROR: 未发现有效的 JSON 字典内容。"
+        if not match: return "ERROR: 未发现 JSON 数据"
         
-        clean_json = match.group(0)
-        data = json.loads(clean_json)
+        data = json.loads(match.group(0))
         
-        # 容错：确保 schedule 列表存在
-        if "schedule" not in data:
-            data["schedule"] = []
-            
-        # 自动清洗：如果 AI 还是输出了 "N/A" 或 "未提供"，将其转为空字符串
-        for key, value in data.items():
-            if isinstance(value, str) and ("未提供" in value or "N/A" in value or "not provided" in value.lower()):
-                data[key] = ""
+        # 2. 关键补丁：全局递归清洗 "None"、None 和 "N/A"
+        def clean_data(obj):
+            if isinstance(obj, dict):
+                return {k: clean_data(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_text(v) if isinstance(v, str) else clean_data(v) for v in obj]
+            return obj
+
+        def clean_text(text):
+            # 定义需要剔除的关键词集
+            forbidden_words = ["None", "none", "N/A", "n/a", "未提供", "大纲未标注", "大纲未提供"]
+            if text is None: return ""
+            # 如果文本包含禁词，或者文本本身就是禁词，则转为空字符串
+            if any(word == text.strip() for word in forbidden_words):
+                return ""
+            return text
+
+        # 对整个数据字典进行深度清洗
+        data = clean_data(data)
         
+        # 3. 渲染
         doc = DocxTemplate(template_path)
-        # 渲染
         doc.render(data)
         
         target_stream = io.BytesIO()
@@ -382,6 +390,7 @@ def render_calendar_docx(template_path, json_str):
         return target_stream.getvalue()
     except Exception as e:
         return f"ERROR_RENDER: {str(e)}"
+
 
 # ==================== 2. 教学日历模块页面 ====================
 
