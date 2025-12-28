@@ -326,7 +326,7 @@ def page_syllabus():
                 st.session_state['course_name'] = name
                 st.session_state['total_hours'] = hours
                 st.session_state['major'] = major # 适用专业
-                st.session_state['assessment_method'] = assessment # 考核方式
+                #st.session_state['assessment_method'] = assessment # 考核方式
                 st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
                 st.session_state['ideology_points'] = ideology # 存储思政点，以便日历中安排思政课次                
 
