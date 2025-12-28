@@ -20,8 +20,6 @@ from datetime import datetime
 # 签名插入示例
 from docxtpl import InlineImage
 from docx.shared import Mm
-if teacher_sig_img:
-    data['teacher_sig'] = InlineImage(doc, teacher_sig_img, width=Mm(30))
 
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
