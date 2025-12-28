@@ -423,7 +423,7 @@ def page_calendar():
         "考核方式", 
         ["考试", "考查"], 
         index=1 if st.session_state.get('assessment_method') == "考查" else 0,
-        help="此项将强制覆盖大纲中的识别结果"
+        help="此项将强制覆盖大纲中的识别结果", horizontal=True
     )
     
     # 更新 session_state 以便同步
