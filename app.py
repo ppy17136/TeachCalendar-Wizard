@@ -173,8 +173,20 @@ def safe_extract_text(file, max_chars=15000):
             
         elif file.name.endswith(".docx"):
             doc = Document(file)
-            full_text = [p.text for p in doc.paragraphs]
-            return "\n".join(full_text)[:max_chars]
+            # 1. 提取普通段落
+            for p in doc.paragraphs:
+                if p.text.strip():
+                    text_list.append(p.text)
+            
+            # 2. 关键：提取表格内容 (这是您目前缺失的)
+            for table in doc.tables:
+                for row in table.rows:
+                    # 将一行中的单元格用空格或竖线隔开，模拟表格结构
+                    row_text = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if row_text:
+                        text_list.append(" | ".join(row_text))
+            
+            return "\n".join(text_list)[:max_chars]
             
         elif file.name.endswith(".doc"):
             return mammoth.convert_to_text(file).value[:max_chars]
@@ -183,7 +195,6 @@ def safe_extract_text(file, max_chars=15000):
     except Exception as e:
         st.error(f"文件 {file.name} 解析出错: {str(e)}")
         return ""
-
 
 def render_pdf_images(pdf_file):
     images = []
