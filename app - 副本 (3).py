@@ -495,7 +495,7 @@ def render_approval_view(role):
 # ==================== 2. 教学日历模块页面 ====================
 def page_calendar():
     nav_bar(show_back=True)
-    st.subheader("📅 教学日历编报与审批系统")
+    st.subheader("📅 智能填充教学日历 (基于 docxtpl 模版技术)")
     # 模拟角色切换（实际应用中应由登录系统决定）
     user_role = st.sidebar.selectbox("当前操作角色", ["授课教师", "系主任", "主管院长"])
     
@@ -506,47 +506,35 @@ def page_calendar():
     else:
         render_approval_view("Dean")    
     # --- 1. 基础参数与状态同步 ---
-# --- 1. 初始化审批状态 ---
-    if "calendar_status" not in st.session_state:
-        st.session_state.calendar_status = "Draft" # 状态：Draft -> Pending_Head -> Pending_Dean -> Approved
-
-    # --- 2. 基础信息配置区 ---
-    with st.container(border=True):
-        st.markdown("##### 👤 教师与课程基本信息")
-        c1, c2, c3 = st.columns([1.5, 2, 1.5])
-        school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
-        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
-        
-        # 自动获取日期
-        today_str = datetime.now().strftime("%Y年 %m月 %d日")
-        
-        t1, t2, t3 = st.columns(3)
-        teacher_name = t1.text_input("主讲教师姓名", value=st.session_state.get('teacher_name', ""))
-        teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
-        current_assessment = t3.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                     index=1 if st.session_state.get('assessment_method') == "考查" else 0)
-
-    # --- 3. 电子签名管理 ---
-    with st.expander("✍️ 电子签名管理", expanded=False):
-        sig_col1, sig_col2 = st.columns(2)
-        use_saved_sig = sig_col1.checkbox("使用系统预存签名", value=True)
-        if not use_saved_sig:
-            new_sig = sig_col2.file_uploader("上传新的手写签名图片", type=['png', 'jpg'])
-            if new_sig: st.session_state.teacher_sig_path = new_sig
-        else:
-            st.info("已关联预存签名：teacher_signature_v1.png")
-
-    # --- 4. 进度表：智能抽取与逻辑拆分 ---
-    st.divider()
-    st.markdown("##### 🗓️ 教学进度表编辑")
+    # 第一行：课程与学校信息
+    c1, c2, c3 = st.columns([1.5, 2, 1.5])
+    school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
+    course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
     
-    # 数据来源处理
-    syllabus_file = st.file_uploader("上传新大纲以更新内容 (可选)", type=['docx', 'pdf'])
-    syl_ctx = ""
-    if syllabus_file:
-        syl_ctx = safe_extract_text(syllabus_file)
-    else:
-        syl_ctx = st.session_state.gen_content.get("syllabus", "未提供大纲，请手动填写。")
+    # 获取当前系统日期
+    now = datetime.now()
+    today_str = now.strftime("%Y年 %m月 %d日")
+    
+    # 第二行：教师信息（新增添加项）与日期
+    t1, t2, t3 = st.columns(3)
+    teacher_name = t1.text_input("主讲教师姓名", value=st.session_state.get('teacher_name', "张三"))
+    teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', "副教授"))
+    # 日期作为只读显示，确保用户知情
+    st.info(f"📅 自动生成的签名日期：{today_str}")
+
+    # 第三行：学时与考核方式 (改为水平排列)
+    col_u3, col_u4, col_u5 = st.columns(3)
+    total_hours = col_u3.number_input("总学时", value=int(st.session_state.get('total_hours', 24)))
+    total_weeks = col_u4.number_input("总周数", value=12)
+    current_assessment = col_u5.radio(
+        "考核方式", 
+        ["考试", "考查"], 
+        index=1 if st.session_state.get('assessment_method') == "考查" else 0,
+        help="此项将强制覆盖大纲中的识别结果", horizontal=True
+    )
+    
+    # 更新 session_state 以便同步
+    st.session_state['assessment_method'] = current_assessment
     
     # --- 2. 模版选择 ---
     st.divider()
@@ -661,79 +649,48 @@ def page_calendar():
             """
 
 
-json_res = ai_generate(split_prompt, engine_id, selected_model)
-            # 解析并存入 session_state.calendar_data
-            try:
-                match = re.search(r'\[.*\]', json_res, re.DOTALL)
-                st.session_state.calendar_data = json.loads(match.group(0))
-            except: st.error("解析失败，请重试")
-
-    # --- 5. 可编辑进度表与原文对照 ---
-    if "calendar_data" in st.session_state:
-        # 使用 data_editor 实现每一项可修改
-        edited_df = st.data_editor(
-            st.session_state.calendar_data,
-            column_config={
-                "source_text": st.column_config.TextColumn("📖 大纲原文依据", width="medium", help="此项内容抽取的原始文本"),
-                "content": st.column_config.TextColumn("教学内容", width="large"),
-                "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
-            },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="calendar_editor"
-        )
-        st.session_state.calendar_data = edited_df
-
-    # --- 6. 提交审批与下载 ---
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("📤 提交教学日历审批", type="primary"):
-            st.session_state.calendar_status = "Pending_Head"
-            st.success("已提交至系主任审批！")
-    
-    with col_btn2:
-        # 即使在草拟阶段也可下载
-        if st.session_state.get("calendar_data"):
-            full_data = {
-                "course_name": course_name, "teacher_name": teacher_name, 
-                "schedule": st.session_state.calendar_data, "sign_date_1": today_str
-                # ... 其他字段
-            }
-            # 调用渲染函数生成 docx
-            # ...
-            st.download_button("💾 下载当前版本日历", data=b"fake_data", file_name="教学日历_草稿.docx")
-
-    # --- 7. 审批过程实时显示 ---
-    st.divider()
-    st.markdown("##### 🚥 审批进度监控")
-    
-    # 定义进度条和节点
-    status_map = {"Draft": 0, "Pending_Head": 33, "Pending_Dean": 66, "Approved": 100}
-    current_step = status_map.get(st.session_state.calendar_status, 0)
-    st.progress(current_step)
-    
-    cols = st.columns(4)
-    steps = ["草拟中", "系主任审核", "主管院长审批", "完成"]
-    for i, step in enumerate(steps):
-        if current_step >= (i * 33): cols[i].success(f"● {step}")
-        else: cols[i].write(f"○ {step}")
-
-    # 显示审批结果
-    with st.expander("📋 查看详细审批意见"):
-        if st.session_state.calendar_status == "Draft":
-            st.write("尚未提交审批。")
-        else:
-            st.write(f"**系主任意见：** {st.session_state.get('head_opinion', '等待处理...')}")
-            if st.session_state.get('head_sig'): st.image(st.session_state.head_sig, width=100)
+            # 调用 AI 引擎提取 JSON
+            json_res = ai_generate(final_prompt, engine_id, selected_model)
             
-            st.write(f"**主管院长意见：** {st.session_state.get('dean_opinion', '等待处理...')}")
-            if st.session_state.get('dean_sig'): st.image(st.session_state.dean_sig, width=100)
+            # --- 终极保底覆盖：确保界面值 100% 生效 ---
+            try:
+                match = re.search(r'\{.*\}', json_res, re.DOTALL)
+                data = json.loads(match.group(0))
+                
+                # 覆盖 AI 可能识别错的字段
+                data['teacher_name'] = teacher_name
+                data['teacher_title'] = teacher_title
+                data['sign_date_1'] = today_str
+                data['assessment_method'] = current_assessment
+                data['school_name'] = school_name
+                
+          
+                # 将生成的 JSON 和模版路径存入缓存，供下载调用
+                st.session_state.generated_json_data = json_res
+                st.session_state.active_template_path = current_template_path
+                
+                st.success("✅ 数据提取完成！下方可预览数据并下载填充后的文档。")            
+            except:
+                st.session_state.generated_json_data = json_res                   
 
-    # 如果审批全部通过，提供最终版下载
-    if st.session_state.calendar_status == "Approved":
-        st.balloons()
-        st.success("🎉 审批已全部通过！您可以下载完整盖章版的教学日历。")
-        st.download_button("📥 下载完整审批版教学日历", data=b"final_docx", file_name=f"{course_name}_最终版教学日历.docx")
+    # --- 4. 预览与下载 ---
+    if st.session_state.get("generated_json_data"):
+        with st.expander("🔍 查看 AI 提取的填充数据"):
+            st.code(st.session_state.generated_json_data, language="json")
+        
+        # 执行填充并提供下载
+        filled_docx = render_calendar_docx(
+            st.session_state.active_template_path, 
+            st.session_state.generated_json_data
+        )
+        
+        if filled_docx:
+            st.download_button(
+                label="💾 点击下载已自动填充的模版文件 (.docx)",
+                data=filled_docx,
+                file_name=f"{course_name}_填充版教学日历.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ) 
         
   
 def page_program():
