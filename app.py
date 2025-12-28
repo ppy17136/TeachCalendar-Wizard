@@ -507,6 +507,12 @@ def page_calendar():
             - 模板描述：{template_desc}
             - 核心参数：课程 {course_name} | 总学时 {total_hours} | 周数 {total_weeks}
             
+
+            # 考核方式提取专供指令：
+            1. 请定位大纲“课程基本信息”表格 。
+            2. 识别符号逻辑：如果在“考查”二字左侧发现了 [☑]、[R]、[√] 或特殊字符，则 assessment_method 必须确认为“考查”。
+            3. 优先级参考：如果大纲中难以识别，请优先使用用户在界面选择的参数：{st.session_state.get('assessment_method', '考查')}。
+                        
             # 禁令
             - **绝对严禁**输出字符串 "None"、"N/A" 或任何解释大纲缺失内容的文字。如果信息缺失，对应键值必须为 ""。
             - 严禁输出 Markdown 标记。            
