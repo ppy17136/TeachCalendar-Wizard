@@ -19,6 +19,7 @@ from datetime import datetime
 # 签名插入示例
 from docxtpl import InlineImage
 from docx.shared import Mm, Pt
+import pandas as pd  # 必须添加，用于数据类型清洗
 
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
@@ -452,22 +453,57 @@ def render_teacher_view():
             2. 必须包含字段 "source_text"，存入该项对应的大纲原文片段。
             JSON 键名：week, sess, content, req, hrs, method, other, obj, source_text
             """
-            json_res = ai_generate(split_prompt, engine_id, selected_model)
+            
             try:
-                st.session_state.calendar_data = json.loads(re.search(r'\[.*\]', json_res, re.DOTALL).group(0))
-            except: st.error("AI 抽取失败，请手动录入")
+                match = re.search(r'\[.*\]', json_res, re.DOTALL)
+                raw_data = json.loads(match.group(0))
+                
+                # 预清洗：确保字段存在且类型基本统一
+                cleaned_list = []
+                for item in raw_data:
+                    cleaned_item = {
+                        "week": str(item.get("week", "")),
+                        "sess": str(item.get("sess", "")),
+                        "content": str(item.get("content", "")),
+                        "req": str(item.get("req", "")),
+                        "hrs": item.get("hrs", 2),
+                        "method": str(item.get("method", "")),
+                        "other": str(item.get("other", "")),
+                        "obj": str(item.get("obj", "")),
+                        "source_text": str(item.get("source_text", ""))
+                    }
+                    cleaned_list.append(cleaned_item)
+                
+                st.session_state.calendar_data = cleaned_list
+            except Exception as e: 
+                st.error(f"解析失败: {str(e)}")            
+            
+            
 
-    if "calendar_data" in st.session_state:
-        # data_editor 允许每一项手动修改 [cite: 40]
-        st.session_state.calendar_data = st.data_editor(
-            st.session_state.calendar_data,
+    # --- 5. 可编辑进度表与原文对照 ---
+    if "calendar_data" in st.session_state and st.session_state.calendar_data:
+        # 核心修复：先转换为 DataFrame 并清洗类型
+        df = pd.DataFrame(st.session_state.calendar_data)
+        
+        # 强制将所有列转换为字符串类型，防止混合类型导致 Arrow 报错
+        # 或者针对特定列进行转换，例如：df['hrs'] = pd.to_numeric(df['hrs'], errors='coerce').fillna(2)
+        df = df.fillna("").astype(str) 
+
+        # 使用清洗后的 DataFrame 渲染编辑器
+        edited_df = st.data_editor(
+            df,
             column_config={
-                "source_text": st.column_config.TextColumn("📖 大纲依据", width="medium", disabled=True),
+                "source_text": st.column_config.TextColumn("📖 大纲原文依据", width="medium", help="此项内容抽取的原始文本"),
                 "content": st.column_config.TextColumn("教学内容", width="large"),
                 "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
             },
-            num_rows="dynamic", use_container_width=True
+            num_rows="dynamic",
+            use_container_width=True,
+            key="calendar_editor"
         )
+        
+        # 将编辑后的 DataFrame 转回列表存入 session_state
+        st.session_state.calendar_data = edited_df.to_dict('records')
 
     # --- 4. 提交审批 ---
     if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
