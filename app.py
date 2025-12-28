@@ -157,38 +157,36 @@ def extract_text_from_file(file):
 
 
 def safe_extract_text(file, max_chars=15000):
-    """高性能、低内存占用文本提取 (针对大教材优化)"""
     if not file: return ""
     try:
         text_list = []
         if file.name.endswith(".pdf"):
-            # 使用 PyMuPDF (fitz) 进行流式读取，内存占用极小
             with fitz.open(stream=file.read(), filetype="pdf") as doc:
                 for page in doc:
                     text_list.append(page.get_text())
-                    # 达到长度限制即刻停止解析，防止内存溢出
-                    if sum(len(t) for t in text_list) > max_chars:
-                        break
+                    if sum(len(t) for t in text_list) > max_chars: break
             return "".join(text_list)[:max_chars]
             
         elif file.name.endswith(".docx"):
             doc = Document(file)
-            # 1. 提取普通段落
             for p in doc.paragraphs:
                 if p.text.strip(): text_list.append(p.text)
             
-            # 2. 增强型表格提取：识别复选框符号
             for table in doc.tables:
                 for row in table.rows:
                     processed_cells = []
                     for cell in row.cells:
                         content = cell.text
-                        # 核心逻辑：将 Word 常见的复选框符号映射为文字，让 AI “看见”打勾
-                        # ☑ (U+2611), þ (Wingdings 中的选中), [x] 等
-                        if '☑' in content or '\xfe' in content or 'þ' in content:
-                            content = content.replace('☑', '[已选中]').replace('þ', '[已选中]')
-                        elif '☐' in content or '\xa8' in content:
-                            content = content.replace('☐', '[未选中]')
+                        # --- 核心改进：非互斥全量替换，涵盖更多 Word 特殊符号 ---
+                        # 识别“已选中”符号
+                        checked_chars = ['☑', 'þ', '\xfe', '\uf0fe', '☒', '√']
+                        # 识别“未选中”符号
+                        unchecked_chars = ['☐', '¨', '\xa8', '\uf0a1', '□']
+                        
+                        for c in checked_chars:
+                            content = content.replace(c, '[已选中]')
+                        for u in unchecked_chars:
+                            content = content.replace(u, '[未选中]')
                         
                         processed_cells.append(content.strip())
                     
@@ -196,11 +194,10 @@ def safe_extract_text(file, max_chars=15000):
                     if row_text: text_list.append(" | ".join(row_text))
             
             return "\n".join(text_list)[:max_chars]
-            
         elif file.name.endswith(".doc"):
-            return mammoth.convert_to_text(file).value[:max_chars]
-            
+            return mammoth.convert_to_text(file).value[:max_chars]            
         return ""
+
     except Exception as e:
         st.error(f"文件 {file.name} 解析出错: {str(e)}")
         return ""
@@ -529,6 +526,7 @@ def page_calendar():
             # 考核方式识别专项逻辑：
             1. 请在教学大纲{syl_ctx}“课程基本信息”表中寻找考核方式。
             2. 识别准则：如果你在“考查”旁边看到了“[已选中]”、“☑”或“√”或“R”，则 assessment_method 必须确定为“考查”。
+            - 如果“考查”旁边带有文字标记 `[已选中]`，或者其左侧有勾选符号，如“☑”, “R”, 'þ', '\xfe', '\uf0fe', '☒', '√'等，则 assessment_method 必须为“考查”。
             3. 识别准则：如果你在“考试”旁边看到了上述符号，则为“考试”。
             4. 严禁幻觉：不要根据课程名称猜测，必须以标记符号为准。            
            
