@@ -661,7 +661,7 @@ def page_calendar():
             """
 
 
-json_res = ai_generate(split_prompt, engine_id, selected_model)
+            json_res = ai_generate(split_prompt, engine_id, selected_model)
             # 解析并存入 session_state.calendar_data
             try:
                 match = re.search(r'\[.*\]', json_res, re.DOTALL)
