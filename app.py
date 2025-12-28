@@ -453,7 +453,7 @@ def render_teacher_view():
             2. 必须包含字段 "source_text"，存入该项对应的大纲原文片段。
             JSON 键名：week, sess, content, req, hrs, method, other, obj, source_text
             """
-            
+            json_res = ai_generate(split_prompt, engine_id, selected_model)
             try:
                 match = re.search(r'\[.*\]', json_res, re.DOTALL)
                 raw_data = json.loads(match.group(0))
@@ -476,8 +476,7 @@ def render_teacher_view():
                 
                 st.session_state.calendar_data = cleaned_list
             except Exception as e: 
-                st.error(f"解析失败: {str(e)}")            
-            
+                st.error(f"解析失败: {str(e)}")   
             
 
     # --- 5. 可编辑进度表与原文对照 ---
