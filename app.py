@@ -24,7 +24,11 @@ import pandas as pd  # 必须添加，用于数据类型清洗
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
-
+# --- 2. 状态自动化初始化 (在 app.py 顶部) ---
+if "calendar_data" not in st.session_state:
+    st.session_state.calendar_data = [] # 初始化为空列表，防止 AttributeError
+if "calendar_status" not in st.session_state:
+    st.session_state.calendar_status = "Draft" # 初始状态为草拟
 st.set_page_config(page_title="智能教学辅助系统", layout="wide", initial_sidebar_state="expanded")
 
 # --- 3. 密钥获取与侧边栏 ---
@@ -504,20 +508,35 @@ def render_teacher_view():
         # 将编辑后的 DataFrame 转回列表存入 session_state
         st.session_state.calendar_data = edited_df.to_dict('records')
 
-    # --- 4. 提交审批 ---
+
+# --- 6. 提交审批与下载 (约 500-520 行) ---
     if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
-        # 封装最终数据包存入 session_state 供流转
+        # 核心修复：增加非空校验
+        if not st.session_state.calendar_data:
+            st.error("❌ 提交失败：检测到进度表内容为空，请先点击‘从大纲抽取’或手动添加内容。")
+            return
+
+        # 封装最终数据包
         st.session_state.pending_calendar = {
-            "school_name": school_name, "academic_year": academic_year, "semester": semester,
-            "course_name": course_name, "class_info": class_info, "teacher_name": teacher_name,
-            "teacher_title": teacher_title, "total_hours": total_hours, "term_hours": total_hours,
-            "total_weeks": total_weeks, "weekly_hours": total_hours // total_weeks,
-            "course_nature": course_nature, "assessment_method": current_assessment,
-            "schedule": st.session_state.calendar_data, "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
+            "school_name": school_name, 
+            "academic_year": academic_year, 
+            "semester": semester,
+            "course_name": course_name, 
+            "class_info": class_info, 
+            "teacher_name": teacher_name,
+            "teacher_title": teacher_title, 
+            "total_hours": total_hours, 
+            "total_weeks": total_weeks,
+            "assessment_method": current_assessment, 
+            "schedule": st.session_state.calendar_data, # 此时已安全
+            "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
         }
-        st.session_state.teacher_sig_img = teacher_sig_file
         st.session_state.calendar_status = "Pending_Head"
-        st.success("已提交至教研室主任审批！")
+        st.success("✅ 已提交至系主任审批！")
+        st.rerun() # 刷新页面以进入下一审批节点
+
+
+
 
 # --- 审批视图：流转控制 ---
 def render_approval_view(role):
