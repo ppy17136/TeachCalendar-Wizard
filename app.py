@@ -506,7 +506,11 @@ def page_calendar():
             - 教学大纲全文：{syl_ctx[:8000]}
             - 模板描述：{template_desc}
             - 核心参数：课程 {course_name} | 总学时 {total_hours} | 周数 {total_weeks}
-
+            
+            # 禁令
+            - **绝对严禁**输出字符串 "None"、"N/A" 或任何解释大纲缺失内容的文字。如果信息缺失，对应键值必须为 ""。
+            - 严禁输出 Markdown 标记。            
+           
             """
 
 
