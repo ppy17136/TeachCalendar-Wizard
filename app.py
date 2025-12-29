@@ -445,17 +445,21 @@ def render_teacher_view():
 
         st.markdown("---")
         m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
-        book_name = m1.text_input("教材名称", value="")
-        publisher = m2.text_input("出版社", value="")
-        pub_date = m3.text_input("出版时间", value="")
-        book_remark = m4.text_input("获奖情况", value="")
+        book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
+        publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
+        pub_date = m3.text_input("出版时间", value=st.session_state.get("pub_date", ""))
+        book_remark = m4.text_input("获奖情况", value=st.session_state.get("book_remark", ""))
         
-        ref_books = st.text_area("参考书目", value="")
+        ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
         
         k1, k2 = st.columns(2)
         assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                 index=1 if st.session_state.get('assessment_method') == "考查" else 0)
+                                 index=0 if st.session_state.get("assessment_method") == "考试" else 1)
         grading_formula = k2.text_input("成绩计算方法", value="总成绩=平时成绩 30%+考试成绩 70%")
+
+
+
+
 
     # --- 3. 备注与签名 ---
     with st.container(border=True):
@@ -472,20 +476,74 @@ def render_teacher_view():
     st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
     syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
     
-    if st.button("🪄 依据大纲抽取并执行拆分"):
-        with st.spinner("执行 OBE 逻辑拆分中..."):
+    # 在点击按钮后的逻辑中
+    if st.button("🪄 依据大纲抽取并自动拆分学时"):
+        with st.spinner("正在深度解析大纲并同步填报信息..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
-            prompt = f"""解析大纲内容：{syl_ctx[:8000]}。
-            生成教学日历 JSON 列表。要求：
-            1. 若模块学时 > 2，必须拆分为连续行。如 4 学时拆为“模块X(1/2)”2学时和“模块X(2/2)”2学时。
-            2. 必须包含 source_text 字段，存入大纲原文。
-            JSON 键：week, sess, content, req, hrs, method, other, obj, source_text"""
-            res = ai_generate(prompt, engine_id, selected_model)
+            
+            # 定义完整提取提示词
+            split_prompt = f"""
+            # 角色
+            你是一位精通 OBE 理念的高校教务专家。
+            
+            # 任务
+            解析提供的【教学大纲】，提取所有填报项，并生成严格对齐课次的教学日历 JSON。
+            
+            # 核心约束（最高优先级）
+            1. **数学平衡**：总学时为 {total_hours}，总周数为 {total_weeks}。经计算，每周必须精确安排 【{weekly_hours}】 学时。
+            2. **周学时定额**：在 schedule 列表中，同一周(week)内所有项的 hrs 之和必须【绝对等于】{weekly_hours}。
+            3. **拆分逻辑**：若大纲某模块学时 > {weekly_hours}，必须拆分为连续的两周（或更多）。例如：模块X(4学时) -> 第N周(2学时) + 第N+1周(2学时)。
+            4. **合并逻辑**：若某模块学时为 1，必须与大纲下一个模块合并在同一周(week)内，确保该周总学时为 {weekly_hours}。
+            
+            # 提取字段要求
+            请从大纲中提取并输出以下 JSON 结构：
+            {{
+                "base_info": {{
+                    "textbook_name": "教材名称",
+                    "publisher": "出版社",
+                    "publish_date": "出版时间",
+                    "textbook_remark": "获奖情况",
+                    "references": "参考书目字符串",
+                    "assessment_method": "考试或考查",
+                    "grading_formula": "成绩计算方法",
+                    "lecture_hours": 讲课学时(数字),
+                    "lab_hours": 实验学时(数字),
+                    "quiz_hours": 测验学时(数字),
+                    "extra_hours": 课外学时(数字)
+                }},
+                "schedule": [
+                    {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 数字, "method": "方法", "other": "作业", "obj": "目标", "source_text": "大纲原文片段" }}
+                ]
+            }}
+            
+            # 参考资料
+            教学大纲内容：{syl_ctx[:10000]}
+            """
+            
+            res = ai_generate(split_prompt, engine_id, selected_model)
             try:
-                raw_data = json.loads(re.search(r'\[.*\]', res, re.DOTALL).group(0))
-                # 统一数据类型，防止 ArrowInvalid 报错
-                st.session_state.calendar_data = pd.DataFrame(raw_data).fillna("").astype(str).to_dict('records')
-            except: st.error("AI 提取失败，请检查输入")
+                # 1. 解析 JSON
+                match = re.search(r'\{.*\}', res, re.DOTALL)
+                full_data = json.loads(match.group(0))
+                
+                # 2. 自动刷新 UI 字段（将提取的信息存入 session_state）
+                bi = full_data.get("base_info", {})
+                st.session_state["textbook_name"] = bi.get("textbook_name", "")
+                st.session_state["publisher"] = bi.get("publisher", "")
+                st.session_state["publish_date"] = bi.get("publish_date", "")
+                st.session_state["textbook_remark"] = bi.get("textbook_remark", "")
+                st.session_state["references_text"] = bi.get("references", "")
+                st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
+                st.session_state["grading_formula"] = bi.get("grading_formula", "")
+                
+                # 3. 进度表数据处理
+                raw_schedule = full_data.get("schedule", [])
+                st.session_state.calendar_data = pd.DataFrame(raw_schedule).fillna("").astype(str).to_dict('records')
+                
+                st.success("✅ 大纲信息已同步刷新至上方表单！")
+                st.rerun() # 强制刷新页面以显示新数据
+            except Exception as e:
+                st.error(f"解析并同步失败: {str(e)}")
 
     if st.session_state.calendar_data:
         # 隐藏 source_text 以保持页面整洁，但保留在数据中
