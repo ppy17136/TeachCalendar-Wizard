@@ -413,7 +413,7 @@ def render_teacher_view():
     #st.markdown("#### 📝 教师端：教学日历编报")
     q1.markdown("#### 📝 教师端：教学日历编报")
     syllabus_file = q3.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
-    q4button = q4.button("🪄 依据大纲抽取并自动拆分学时"):
+    q4button = q4.button("🪄 依据大纲抽取并自动拆分学时")
     # --- 1. 基础信息配置 ---
     with st.container(border=True):
         st.markdown("##### 👤 1. 基本信息")
