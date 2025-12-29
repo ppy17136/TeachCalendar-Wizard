@@ -427,7 +427,7 @@ def render_teacher_view():
     q4button = header_col2.button("🪄 依据大纲抽取\n并同步所有项", use_container_width=True, type="primary")
 
     # --- 3. 抽取与全项刷新逻辑 ---
-if q4button:
+    if q4button:
         with st.spinner("正在解析大纲并同步全项信息 (包括学时、教材、获奖等)..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
             
