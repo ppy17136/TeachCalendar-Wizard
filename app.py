@@ -702,7 +702,15 @@ def page_calendar():
         }
         
         # 使用现有的 template_general.docx
-        doc_bytes = render_calendar_docx("template_general.docx", final_data, sig_map)
+        #doc_bytes = render_calendar_docx("template_general.docx", final_data, sig_map)
+        # 2. 根据学校名称判定模板路径
+        if current_school == "辽宁石油化工大学":
+            selected_template = "template_lnpu.docx"
+        else:
+            selected_template = "template_general.docx"
+
+        # 3. 调用填充函数，使用选定的模板变量
+        doc_bytes = render_calendar_docx(selected_template, final_data, sig_map)
         if doc_bytes:
             st.download_button("📥 下载完整审批版 (.docx)", data=doc_bytes, file_name="教学日历_已审批.docx")
   
