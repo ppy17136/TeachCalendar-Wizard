@@ -428,6 +428,17 @@ def render_teacher_view():
 
     # --- 3. 抽取与全项刷新逻辑 ---
     if q4button:
+        syl_content = ""
+        if syllabus_file:
+            syl_content = safe_extract_text(syllabus_file)
+        else:
+            # 尝试从上一页生成的大纲中获取，若无则为空字符串
+            syl_content = st.session_state.gen_content.get("syllabus") or ""
+        
+        if not syl_content.strip():
+            st.warning("⚠️ 未检测到大纲内容。请先上传大纲文件，或在“教学大纲生成”页面先生成大纲。")
+            return
+
         with st.spinner("正在解析大纲并同步全项信息 (包括学时、教材、获奖等)..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
             
