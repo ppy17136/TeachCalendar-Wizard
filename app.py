@@ -409,8 +409,11 @@ def render_calendar_docx(template_path, data_dict, sig_images=None):
         return None
 
 def render_teacher_view():
-    st.markdown("#### 📝 教师端：教学日历编报")
-    
+    q1, q2, q3, q4 = st.columns(4)
+    #st.markdown("#### 📝 教师端：教学日历编报")
+    q1.markdown("#### 📝 教师端：教学日历编报")
+    syllabus_file = q3.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
+    q4button = q4.button("🪄 依据大纲抽取并自动拆分学时"):
     # --- 1. 基础信息配置 ---
     with st.container(border=True):
         st.markdown("##### 👤 1. 基本信息")
@@ -473,7 +476,8 @@ def render_teacher_view():
     syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
 
     # --- 4. 进度表编辑按钮逻辑 ---
-    if st.button("🪄 依据大纲抽取并自动拆分学时"):
+    #if st.button("🪄 依据大纲抽取并自动拆分学时"):
+    if q4button:
         with st.spinner("正在解析大纲并刷新全项信息..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
             
@@ -624,9 +628,11 @@ def render_approval_view(role):
 
 def page_calendar():
     nav_bar(show_back=True)
-    st.subheader("📅 教学日历编报与多级审批")
-    
-    user_role = st.sidebar.selectbox("切换角色视图", ["授课教师", "系主任", "主管院长"])
+    m1, m2, m3 = st.columns(3)
+    #st.subheader("📅 教学日历编报与多级审批")
+    m1.subheader("📅 教学日历编报与多级审批")
+    user_role = m3.selectbox("切换角色视图", ["授课教师", "系主任", "主管院长"])
+    #user_role = st.sidebar.selectbox("切换角色视图", ["授课教师", "系主任", "主管院长"])
     
     if user_role == "授课教师": render_teacher_view()
     elif user_role == "系主任": render_approval_view("Head")
