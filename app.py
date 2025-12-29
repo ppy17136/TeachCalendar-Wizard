@@ -430,13 +430,17 @@ def render_teacher_view():
     with st.container(border=True):
         st.markdown("##### 📚 2. 学时分配与教材")
         h1, h2, h3, h4 = st.columns(4)
+        
+        # 修正 1：总学时数
         total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
-        term_hours = h2.number_input("本学期总学时", value=total_hours)
+        # 修正 2：本学期总学时 (关键：不要直接绑定 local 变量 total_hours)
+        term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('term_hours', total_hours)))
+        
         total_weeks = h3.number_input("上课周数", value=12)
         weekly_hours = h4.number_input("平均每周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
 
         d1, d2, d3, d4, d5 = st.columns(5)
-        # 增加 session_state 绑定，以便刷新
+        # 修正 3：各分项学时与课程性质
         lec_h = d1.number_input("讲课学时", value=int(st.session_state.get('lecture_hours', total_hours)))
         lab_h = d2.number_input("实验学时", value=int(st.session_state.get('lab_hours', 0)))
         qui_h = d3.number_input("测验学时", value=int(st.session_state.get('quiz_hours', 0)))
@@ -499,6 +503,7 @@ def render_teacher_view():
             {{
                 "base_info": {{
                     "course_name": "精准提取课程名称",
+                    "course_nature": "提取‘课程性质’（如：必修、选修）",
                     "total_hours": 总学时数(数字),
                     "term_hours": 本学期总学时(数字),
                     "lecture_hours": 讲课学时(数字),
@@ -513,8 +518,6 @@ def render_teacher_view():
                     "assessment_method": "考查或考试",
                     "grading_formula": "成绩计算方法"
                 }},
-
-
 
 
 
@@ -547,12 +550,15 @@ def render_teacher_view():
                 st.session_state["textbook_name"] = bi.get("textbook_name", "")
                 st.session_state["publisher"] = bi.get("publisher", "")
                 st.session_state["publish_date"] = bi.get("publish_date", "")
-                st.session_state["textbook_remark"] = bi.get("textbook_remark", "")
+                st.session_state["textbook_remark"] = bi.get("textbook_remark", "") # 获奖情况
                 st.session_state["references_text"] = bi.get("references", "")
                 st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
                 
-                
-                
+                # 进度表逻辑同前...
+                st.rerun() # 强制刷新页面显示新值
+            except Exception as e:
+                st.error(f"解析并同步失败: {str(e)}")
+
                 
                 # 处理进度表
                 raw_schedule = full_data.get("schedule", [])
