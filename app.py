@@ -529,8 +529,6 @@ def render_teacher_view():
                 bi = full_data.get("base_info", {})
                 
                 # 【核心修复】将提取到的值存入 session_state
-
-                # --- 核心修复：补全所有缺失的赋值项 ---
                 st.session_state["course_name"] = bi.get("course_name", "")
                 st.session_state["course_nature"] = bi.get("course_nature", "")
                 st.session_state["total_hours"] = bi.get("total_hours", "")
@@ -545,6 +543,7 @@ def render_teacher_view():
                 st.session_state["textbook_remark"] = bi.get("textbook_remark", "") # 获奖情况
                 st.session_state["references_text"] = bi.get("references", "")
                 st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
+                st.session_state["grading_formula"] = bi.get("grading_formula", "")
 
                 # 处理进度表
                 raw_schedule = full_data.get("schedule", [])
@@ -585,6 +584,9 @@ def render_teacher_view():
                 "note_1": note_1, "note_2": note_2, "note_3": note_3,
                 "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
             }
+            
+            
+            
             st.session_state.teacher_sign_img_file = teacher_sig_file
             st.session_state.calendar_status = "Pending_Head"
             st.success("✅ 已提交至系主任审批！")
