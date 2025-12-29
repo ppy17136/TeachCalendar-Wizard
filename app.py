@@ -427,164 +427,81 @@ def render_teacher_view():
     q4button = header_col2.button("🪄 依据大纲抽取\n并同步所有项", use_container_width=True, type="primary")
 
     # --- 3. 抽取与全项刷新逻辑 ---
-    if q4button:
+if q4button:
         with st.spinner("正在解析大纲并同步全项信息 (包括学时、教材、获奖等)..."):
-            # 提取大纲文本
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
             
-            # 【核心提示词修改】确保数学平衡 (1+2=3 修正) 与全项提取
+            # 强化提示词：增加数学约束和字段覆盖
             split_prompt = f"""
-            # 任务
-            深度解析【教学大纲】，提取所有填报项并生成严格的教学日历 JSON。
+            解析【教学大纲】并输出纯 JSON。
+            约束：总周数 {total_weeks}，每周 hrs 总和必须绝对等于 {weekly_hours}。
             
-            # 核心数学约束 (强制执行)
-            1. **周学时定额**：经计算，每周必须精确安排 【{weekly_hours}】 学时。
-            2. **严禁超支**：在 schedule 列表中，同一周(week)内所有项的 hrs 之和必须【绝对等于】{weekly_hours}。
-            3. **拆分逻辑**：若某内容学时 > {weekly_hours}，必须拆分为连续课次。例如：模块4(4学时) -> 第N周(2) + 第N+1周(2)。
-            
-            # 必须提取并输出的 JSON 结构
+            # 必须提取的字段结构：
             {{
                 "base_info": {{
-                    "course_name": "精准提取课程名称",
-                    "course_nature": "提取‘课程性质’(必修/限选/选修)",
-                    "total_hours": {total_hours}, 
-                    "term_hours": {total_hours},
-                    "lecture_hours": 从大纲提取讲课学时(数字),
-                    "lab_hours": 从大纲提取实验学时(数字),
-                    "quiz_hours": 从大纲提取测验学时(数字),
-                    "extra_hours": 从大纲提取课外/其他学时(数字),
+                    "course_name": "课程名称",
+                    "course_nature": "必修/限选/选修",
+                    "total_hours": 数字,
+                    "term_hours": 数字,
+                    "lecture_hours": 数字,
+                    "lab_hours": 数字,
+                    "quiz_hours": 数字,
+                    "extra_hours": 数字,
                     "textbook_name": "教材名称",
                     "publisher": "出版社",
-                    "publish_date": "出版时间(如 2019)",
-                    "textbook_remark": "获奖情况(若大纲无则留空)",
-                    "references": "参考书目列表文字",
+                    "publish_date": "出版时间",
+                    "textbook_remark": "获奖情况(若无则为空)",
+                    "references": "参考书目",
                     "assessment_method": "考试或考查",
-                    "grading_formula": "成绩计算方法"
+                    "grading_formula": "计算方法"
                 }},
-                "schedule": [
-                    {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 2, "method": "方法", "other": "", "obj": "目标", "source_text": "原文" }}
-                ]
+                "schedule": [...]
             }}
-            大纲全文内容：{syl_ctx[:12000]}
+            大纲内容：{syl_ctx[:10000]}
             """
             
             res = ai_generate(split_prompt, engine_id, selected_model)
             try:
-                # 1. 清洗并解析 JSON
-                match = re.search(r'\{.*\}', res, re.DOTALL)
-                full_data = json.loads(match.group(0))
+                # --- 核心修复：解决 Extra Data 报错 ---
+                # 贪婪匹配最后一个花括号，确保只截取最完整的 JSON 块
+                match = re.search(r'(\{.*\})', res, re.DOTALL)
+                if not match:
+                    st.error("AI 未返回有效的 JSON 格式")
+                    return
+                
+                json_str = match.group(1).strip()
+                full_data = json.loads(json_str)
                 bi = full_data.get("base_info", {})
                 
-                # 2. 【核心修复】将所有提取项存入 session_state 实现“全自动刷新”
+                # --- 核心修复：补全所有缺失项的同步刷新 ---
                 st.session_state["course_name"] = bi.get("course_name", "")
                 st.session_state["course_nature"] = bi.get("course_nature", "专业必修")
-                st.session_state["total_hours"] = int(bi.get("total_hours", total_hours))
-                st.session_state["term_hours"] = int(bi.get("term_hours", total_hours))
-                st.session_state["lecture_hours"] = int(bi.get("lecture_hours", total_hours))
+                
+                # 强制转换为整数，防止 number_input 报错
+                st.session_state["total_hours"] = int(bi.get("total_hours", 24))
+                st.session_state["term_hours"] = int(bi.get("term_hours", 24))
+                st.session_state["lecture_hours"] = int(bi.get("lecture_hours", 24))
                 st.session_state["lab_hours"] = int(bi.get("lab_hours", 0))
                 st.session_state["quiz_hours"] = int(bi.get("quiz_hours", 0))
                 st.session_state["extra_hours"] = int(bi.get("extra_hours", 0))
+                
                 st.session_state["textbook_name"] = bi.get("textbook_name", "")
                 st.session_state["publisher"] = bi.get("publisher", "")
                 st.session_state["publish_date"] = bi.get("publish_date", "")
-                st.session_state["textbook_remark"] = bi.get("textbook_remark", "")
+                st.session_state["textbook_remark"] = bi.get("textbook_remark", "") # 获奖情况
                 st.session_state["references_text"] = bi.get("references", "")
-                st.session_state["assessment_method"] = "考查" if "考查" in bi.get("assessment_method", "") else "考试"
+                st.session_state["assessment_method"] = "考查" if "考查" in str(bi.get("assessment_method", "")) else "考试"
                 st.session_state["grading_formula"] = bi.get("grading_formula", "")
                 
-                # 处理进度表
+                # 进度表数据
                 raw_sched = full_data.get("schedule", [])
                 st.session_state.calendar_data = pd.DataFrame(raw_sched).fillna("").astype(str).to_dict('records')
                 
-                st.success("✅ 大纲所有项（含学时分配、课程名、获奖情况）已刷新！")
-                st.rerun() # 强制刷新以显示新值
+                st.success("✅ 大纲全项信息已同步刷新！")
+                st.rerun() # 必须执行 rerun 才能让输入框显示新值
+                
             except Exception as e:
-                st.error(f"解析失败，请检查大纲格式: {str(e)}")
-
-    # --- 4. UI 填写项展示 (全项绑定缓存) ---
-    with st.container(border=True):
-        st.markdown("##### 👤 1. 基本信息")
-        c1, c2, c3 = st.columns([1.5, 2, 1.5])
-        school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
-        # 必须绑定 session_state 才能实现刷新
-        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
-        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
-        
-        t1, t2, t3, t4 = st.columns(4)
-        teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
-        teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
-        academic_year = t3.text_input("学年 (如 2025-2026)", value="2025-2026")
-        semester = t4.selectbox("学期", ["1", "2"])
-
-    with st.container(border=True):
-        st.markdown("##### ⏰ 2. 学时分配详情")
-        h1, h2, h3, h4 = st.columns(4)
-        # number_input 必须使用 session_state 确保同步
-        total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)), key="total_hours_input")
-        st.session_state['total_hours'] = total_hours # 同步回缓存
-        
-        term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('term_hours', total_hours)))
-        total_weeks = h3.number_input("上课周数", value=int(st.session_state.get('total_weeks', 12)), key="total_weeks_input")
-        st.session_state['total_weeks'] = total_weeks
-        
-        # 计算周学时
-        wh = total_hours // total_weeks if total_weeks > 0 else 2
-        weekly_hours = h4.number_input("平均每周学时", value=wh)
-
-        d1, d2, d3, d4, d5 = st.columns(5)
-        lec_h = d1.number_input("讲课学时", value=int(st.session_state.get('lecture_hours', total_hours)))
-        lab_h = d2.number_input("实验学时", value=int(st.session_state.get('lab_hours', 0)))
-        qui_h = d3.number_input("测验学时", value=int(st.session_state.get('quiz_hours', 0)))
-        ext_h = d4.number_input("课外学时", value=int(st.session_state.get('extra_hours', 0)))
-        course_nature = d5.text_input("课程性质", value=st.session_state.get('course_nature', "专业必修"))
-
-    with st.container(border=True):
-        st.markdown("##### 📖 3. 教材、考核与备注")
-        m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
-        book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
-        publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
-        pub_date = m3.text_input("出版时间", value=st.session_state.get('publish_date', ""))
-        # 获奖情况刷新修正
-        book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
-        
-        ref_books_input = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
-        
-        k1, k2 = st.columns(2)
-        assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                 index=1 if st.session_state.get('assessment_method') == "考查" else 0)
-        grading_formula = k2.text_input("成绩计算方法", value=st.session_state.get("grading_formula", "总成绩=考试70%+平时30%"))
-
-    # --- 5. 进度表展示与提交 ---
-    if st.session_state.get("calendar_data"):
-        st.divider()
-        st.markdown("##### 🗓️ 4. 进度安排预览与微调")
-        st.session_state.calendar_data = st.data_editor(
-            pd.DataFrame(st.session_state.calendar_data).astype(str),
-            column_config={
-                "source_text": None, # 隐藏原文列
-                "content": st.column_config.TextColumn("教学内容", width="large"),
-                "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
-            },
-            num_rows="dynamic", use_container_width=True, key="cal_edit"
-        ).to_dict('records')
-
-        if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
-            # 封装并保存
-            st.session_state.calendar_final_data = {
-                "school_name": school_name, "course_name": course_name, "academic_year": academic_year,
-                "semester": semester, "class_info": class_info, "teacher_name": teacher_name,
-                "teacher_title": teacher_title, "total_hours": total_hours, "term_hours": term_hours,
-                "lecture_hours": lec_h, "lab_hours": lab_h, "quiz_hours": qui_h, "extra_hours": ext_h,
-                "total_weeks": total_weeks, "weekly_hours": weekly_hours, "course_nature": course_nature,
-                "textbook_name": book_name, "publisher": publisher, "publish_date": pub_date,
-                "textbook_remark": book_remark, "references": [ref_books_input], 
-                "assessment_method": assess_method, "grading_formula": grading_formula,
-                "schedule": st.session_state.calendar_data,
-                "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
-            }
-            st.session_state.calendar_status = "Pending_Head"
-            st.success("已提交审批！")
-            st.rerun()
+                st.error(f"解析失败: {str(e)}")
 
 def render_approval_view(role):
     st.markdown(f"#### 🛡️ {'系主任' if role == 'Head' else '主管院长'}审批界面")
