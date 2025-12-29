@@ -447,18 +447,15 @@ def render_teacher_view():
         m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
         book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
         publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
-        pub_date = m3.text_input("出版时间", value=st.session_state.get("pub_date", ""))
-        book_remark = m4.text_input("获奖情况", value=st.session_state.get("book_remark", ""))
-        
+        pub_date = m3.text_input("出版时间", value=st.session_state.get('publish_date', ""))
+        book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
         ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
         
         k1, k2 = st.columns(2)
+        current_val = st.session_state.get('assessment_method', '考查')
         assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                 index=0 if st.session_state.get("assessment_method") == "考试" else 1)
-        grading_formula = k2.text_input("成绩计算方法", value="总成绩=平时成绩 30%+考试成绩 70%")
-
-
-
+                                 index=0 if "考试" in current_val else 1)
+        grading_formula = k2.text_input("成绩计算方法", value="总成绩=平时成绩 30%+考试成绩 70%")                         
 
 
     # --- 3. 备注与签名 ---
@@ -499,6 +496,7 @@ def render_teacher_view():
             请从大纲中提取并输出以下 JSON 结构：
             {{
                 "base_info": {{
+                    "course_name": "从大纲标题或第一表提取课程名称",
                     "textbook_name": "教材名称",
                     "publisher": "出版社",
                     "publish_date": "出版时间",
@@ -511,6 +509,7 @@ def render_teacher_view():
                     "quiz_hours": 测验学时(数字),
                     "extra_hours": 课外学时(数字)
                 }},
+
                 "schedule": [
                     {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 数字, "method": "方法", "other": "作业", "obj": "目标", "source_text": "大纲原文片段" }}
                 ]
