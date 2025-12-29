@@ -410,50 +410,79 @@ def render_calendar_docx(template_path, data_dict, sig_images=None):
         st.error(f"渲染失败: {str(e)}")
         return None
 
-# --- 教师视图：编报与拆分 ---
+
+# --- 教师端：编报页面 ---
 def render_teacher_view():
     st.markdown("#### 📝 教师端：教学日历编报")
     
-    # --- 1. 基础信息配置 (全部项显示) ---
+    # --- 1. 基础信息配置 (全项显示) ---
     with st.container(border=True):
-        st.markdown("##### 👤 基础参数设置")
+        st.markdown("##### 👤 1. 基础信息设置")
         c1, c2, c3 = st.columns([1.5, 2, 1.5])
         school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
-        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', "数值模拟在材料成型中的应用"))
-        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
+        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
+        class_info = c3.text_input("学生专业及年级", value=st.session_state.get('major', ""))
         
         t1, t2, t3, t4 = st.columns(4)
         teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
         teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
-        academic_year = t3.text_input("学年", value="2023-2024")
+        academic_year = t3.text_input("学年", value="2025-2026")
         semester = t4.selectbox("学期", ["1", "2"])
 
+    with st.container(border=True):
+        st.markdown("##### ⏰ 2. 学时分配详情")
         h1, h2, h3, h4 = st.columns(4)
-        total_hours = h1.number_input("总学时", value=int(st.session_state.get('total_hours', 24)))
-        total_weeks = h2.number_input("总周数", value=12)
-        course_nature = h3.text_input("课程性质", value="专业核心课")
-        current_assessment = h4.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                     index=1 if st.session_state.get('assessment_method') == "考查" else 0)
+        total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
+        term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('total_hours', 24)))
+        total_weeks = h3.number_input("上课周数", value=12)
+        weekly_hours = h4.number_input("周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
 
-    # --- 2. 签名管理 ---
+        d1, d2, d3, d4, d5 = st.columns(5)
+        lecture_hours = d1.number_input("讲课学时", value=total_hours)
+        lab_hours = d2.number_input("实验学时", value=0)
+        quiz_hours = d3.number_input("测验学时", value=0)
+        extra_hours = d4.number_input("课外学时", value=0)
+        course_nature = d5.text_input("课程性质", value="专业必修")
+
+    with st.container(border=True):
+        st.markdown("##### 📖 3. 教材、考核与备注")
+        m1, m2, m3 = st.columns([2, 1, 1])
+        textbook_name = m1.text_input("教材名称", value="数值模拟技术基础")
+        publisher = m2.text_input("出版社", value="石油工业出版社")
+        publish_date = m3.text_input("出版时间", value="2022")
+        textbook_remark = st.text_input("教材获奖情况", value="")
+        
+        references = st.text_area("参考书目", value="[1] XXX, [2] YYY")
+        
+        k1, k2 = st.columns(2)
+        current_assessment = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
+                                     index=1 if st.session_state.get('assessment_method') == "考查" else 0)
+        grading_formula = k2.text_input("成绩计算方法", value="总成绩=平时成绩 30%+考试成绩 70%")
+
+        st.markdown("---")
+        n1, n2, n3 = st.columns(3)
+        note_1 = n1.text_input("备注1", value="")
+        note_2 = n2.text_input("备注2", value="")
+        note_3 = n3.text_input("备注3", value="")
+
+    # --- 2. 电子签名管理 ---
     with st.expander("✍️ 电子签名管理"):
         sig_col1, sig_col2 = st.columns(2)
         use_saved = sig_col1.checkbox("使用系统预存签名", value=True)
         teacher_sig_file = None
         if not use_saved:
-            teacher_sig_file = sig_col2.file_uploader("上传个人手写签名", type=['png', 'jpg'], key="t_sig_up")
+            teacher_sig_file = sig_col2.file_uploader("上传个人手写签名", type=['png', 'jpg'], key="t_sig_new")
         else:
             st.info("已自动关联系统预存教师签名。")
 
     # --- 3. 进度表编辑与原文对照 ---
     st.divider()
-    st.markdown("##### 🗓️ 进度安排编辑")
+    st.markdown("##### 🗓️ 4. 教学进度表编辑")
     syllabus_file = st.file_uploader("上传新大纲以更新内容 (可选)", type=['docx', 'pdf'])
     
     if st.button("🪄 从大纲抽取并执行 OBE 逻辑拆分"):
         with st.spinner("正在解析大纲并进行学时拆分..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
-            # 强制 AI 执行学时拆分逻辑 [cite: 7]
             split_prompt = f"""
             解析大纲内容：{syl_ctx[:8000]}
             生成教学日历 JSON 列表。
@@ -466,93 +495,62 @@ def render_teacher_view():
             try:
                 match = re.search(r'\[.*\]', json_res, re.DOTALL)
                 raw_data = json.loads(match.group(0))
-                
-                # 预清洗：确保字段存在且类型基本统一
-                cleaned_list = []
-                for item in raw_data:
-                    cleaned_item = {
-                        "week": str(item.get("week", "")),
-                        "sess": str(item.get("sess", "")),
-                        "content": str(item.get("content", "")),
-                        "req": str(item.get("req", "")),
-                        "hrs": item.get("hrs", 2),
-                        "method": str(item.get("method", "")),
-                        "other": str(item.get("other", "")),
-                        "obj": str(item.get("obj", "")),
-                        "source_text": str(item.get("source_text", ""))
-                    }
-                    cleaned_list.append(cleaned_item)
-                
-                st.session_state.calendar_data = cleaned_list
+                # 统一数据类型转换
+                st.session_state.calendar_data = pd.DataFrame(raw_data).fillna("").astype(str).to_dict('records')
             except Exception as e: 
                 st.error(f"解析失败: {str(e)}")   
-            
 
-    # --- 5. 可编辑进度表与原文对照 ---
     if "calendar_data" in st.session_state and st.session_state.calendar_data:
-        # 核心修复：先转换为 DataFrame 并清洗类型
-        df = pd.DataFrame(st.session_state.calendar_data)
-        
-        # 强制将所有列转换为字符串类型，防止混合类型导致 Arrow 报错
-        # 或者针对特定列进行转换，例如：df['hrs'] = pd.to_numeric(df['hrs'], errors='coerce').fillna(2)
-        df = df.fillna("").astype(str) 
-
-        # 使用清洗后的 DataFrame 渲染编辑器
-        edited_df = st.data_editor(
-            df,
+        st.session_state.calendar_data = st.data_editor(
+            pd.DataFrame(st.session_state.calendar_data).astype(str),
             column_config={
-                "source_text": st.column_config.TextColumn("📖 大纲原文依据", width="medium", help="此项内容抽取的原始文本"),
+                "source_text": st.column_config.TextColumn("📖 大纲依据 (隐藏)", width="small", help="点击查看此项内容的抽取依据"),
                 "content": st.column_config.TextColumn("教学内容", width="large"),
                 "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
             },
-            num_rows="dynamic",
-            use_container_width=True,
-            key="calendar_editor"
-        )
-        
-        # 将编辑后的 DataFrame 转回列表存入 session_state
-        st.session_state.calendar_data = edited_df.to_dict('records')
+            num_rows="dynamic", use_container_width=True, key="cal_edit"
+        ).to_dict('records')
 
-
-
-    # --- 6. 提交审批与下载 (约 500-520 行) ---
+    # --- 4. 提交审批 (修复变量名不一致) ---
     if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
-        # 核心修复：增加非空校验
         if not st.session_state.calendar_data:
-            st.error("❌ 提交失败：检测到进度表内容为空，请先点击‘从大纲抽取’或手动添加内容。")
-            return
+            st.warning("进度表内容为空，无法提交。")
+        else:
+            # 关键修复：统一使用 calendar_final_data
+            st.session_state.calendar_final_data = {
+                "school_name": school_name, "academic_year": academic_year, "semester": semester,
+                "course_name": course_name, "class_info": class_info, "teacher_name": teacher_name,
+                "teacher_title": teacher_title, "total_hours": total_hours, "term_hours": term_hours,
+                "total_weeks": total_weeks, "weekly_hours": weekly_hours, "course_nature": course_nature,
+                "lecture_hours": lecture_hours, "lab_hours": lab_hours, "quiz_hours": quiz_hours, "extra_hours": extra_hours,
+                "textbook_name": textbook_name, "publisher": publisher, "publish_date": publish_date,
+                "textbook_remark": textbook_remark, "references": [references], "assessment_method": current_assessment,
+                "grading_formula": grading_formula, "schedule": st.session_state.calendar_data,
+                "note_1": note_1, "note_2": note_2, "note_3": note_3,
+                "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
+            }
+            st.session_state.teacher_sign_img = teacher_sig_file
+            st.session_state.calendar_status = "Pending_Head"
+            st.success("已提交至系主任审批！")
+            st.rerun()
 
-        # 封装最终数据包
-        st.session_state.pending_calendar = {
-            "school_name": school_name, 
-            "academic_year": academic_year, 
-            "semester": semester,
-            "course_name": course_name, 
-            "class_info": class_info, 
-            "teacher_name": teacher_name,
-            "teacher_title": teacher_title, 
-            "total_hours": total_hours, 
-            "total_weeks": total_weeks,
-            "assessment_method": current_assessment, 
-            "schedule": st.session_state.calendar_data, # 此时已安全
-            "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日")
-        }
-        st.session_state.calendar_status = "Pending_Head"
-        st.success("✅ 已提交至系主任审批！")
-        st.rerun() # 刷新页面以进入下一审批节点
-
-# --- 审批视图：流转控制 ---
+# --- 审批端视图 (修复 NoneType 报错) ---
 def render_approval_view(role):
     st.markdown(f"#### 🛡️ {'系主任' if role == 'Department_Head' else '主管院长'}审批界面")
     
+    # 增加安全性检查：如果数据为 None，直接返回
+    if st.session_state.calendar_final_data is None:
+        st.info("🍵 目前没有待处理的教学日历申请。")
+        return
+
     target_status = "Pending_Head" if role == "Department_Head" else "Pending_Dean"
     
     if st.session_state.get("calendar_status") == target_status:
-        data = st.session_state.calendar_final_data
+        data = st.session_state.calendar_final_data # 此时 data 保证非 None
         st.info(f"待处理申请：{data['course_name']} (教师：{data['teacher_name']})")
         
         with st.expander("🔍 预览日历详细内容"):
-            st.table(data['schedule'])
+            st.table(pd.DataFrame(data['schedule']).drop(columns=['source_text'], errors='ignore'))
             
         with st.form(f"form_{role}"):
             opinion = st.text_area("审批意见", value="同意，准予执行。" if role == "Dean" else "经审核，符合大纲要求。")
@@ -563,12 +561,12 @@ def render_approval_view(role):
                 if role == "Department_Head":
                     st.session_state.calendar_status = "Pending_Dean"
                     st.session_state.head_opinion = opinion
-                    st.session_state.head_sig = sig_file
+                    st.session_state.head_sign_img = sig_file
                     st.session_state.head_date = datetime.now().strftime("%Y年 %m月 %d日")
                 else:
                     st.session_state.calendar_status = "Approved"
                     st.session_state.dean_opinion = opinion
-                    st.session_state.dean_sig = sig_file
+                    st.session_state.dean_sign_img = sig_file
                     st.session_state.dean_date = datetime.now().strftime("%Y年 %m月 %d日")
                 st.rerun()
             
