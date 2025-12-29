@@ -416,69 +416,7 @@ def render_teacher_view():
     q1, q2, q3 = st.columns(3)
     q4button = q3.button("🪄 依据大纲抽取并自动拆分学时")
     
-    # --- 1. 基础信息配置 ---
-    with st.container(border=True):
-        st.markdown("##### 👤 1. 基本信息")
-        c1, c2, c3 = st.columns([1.5, 2, 1.5])
-        school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
-        # 【关键绑定】确保课程名称读取 session_state
-        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
-        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
-        
-        t1, t2, t3, t4 = st.columns(4)
-        teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
-        teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
-        academic_year = t3.text_input("学年 (如 2025-2026)", value="2025-2026")
-        semester = t4.selectbox("学期", ["1", "2"])
-
-    # --- 2. 学时与教材配置 ---
-    with st.container(border=True):
-        st.markdown("##### 📚 2. 学时分配与教材")
-        h1, h2, h3, h4 = st.columns(4)
-        total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
-        # 修正 2：本学期总学时 (关键：不要直接绑定 local 变量 total_hours)
-        term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('term_hours', total_hours)))
-        total_weeks = h3.number_input("上课周数", value=12)
-        weekly_hours = h4.number_input("平均每周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
-        d1, d2, d3, d4, d5 = st.columns(5)
-        # 修正 3：各分项学时与课程性质
-        lec_h = d1.number_input("讲课学时", value=int(st.session_state.get('lecture_hours', total_hours)))
-        lab_h = d2.number_input("实验学时", value=int(st.session_state.get('lab_hours', 0)))
-        qui_h = d3.number_input("测验学时", value=int(st.session_state.get('quiz_hours', 0)))
-        ext_h = d4.number_input("课外学时", value=int(st.session_state.get('extra_hours', 0)))
-        course_nature = d5.text_input("课程性质", value=st.session_state.get('course_nature', "专业必修"))
-
-        st.markdown("---")
-        m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
-        # 【关键绑定】确保教材详情读取 session_state
-        book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
-        publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
-        pub_date = m3.text_input("出版时间", value=st.session_state.get('publish_date', ""))
-        book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
-        
-        ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
-        k1, k2 = st.columns(2)
-        assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
-                                 index=1 if st.session_state.get('assessment_method') == "考查" else 0)
-        grading_formula = k2.text_input("成绩计算方法", value=st.session_state.get("grading_formula", "总成绩=平时成绩 30%+考试成绩 70%"))
-
-    # --- 3. 备注与签名 ---
-    with st.container(border=True):
-        st.markdown("##### 📝 3. 其他信息")
-        n1, n2, n3 = st.columns(3)
-        note_1 = n1.text_input("备注1", value="在授课过程中，可能根据学生接受情况，微调课程进度")
-        note_2 = n2.text_input("备注2", value="遇到偶发情况需要调课，需履行调停课手续")
-        note_3 = n3.text_input("备注3", value="")
-        
-        teacher_sig_file = st.file_uploader("✍️ 上传/更换手写签名", type=['png', 'jpg'], key="t_sig_up")
-
-    # --- 4. 进度表编辑 (含学时拆分) ---
-    # st.divider()
-    # st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
-    # syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
-
-    # --- 4. 进度表编辑按钮逻辑 ---
-    #if st.button("🪄 依据大纲抽取并自动拆分学时"):
+    
     if q4button:
         with st.spinner("正在解析大纲并刷新全项信息..."):
             syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
@@ -558,7 +496,81 @@ def render_teacher_view():
                 st.success("✅ 大纲所有项（含课程名、教材时间等）已刷新！")
                 st.rerun() # 强制刷新页面显示新值
             except Exception as e:
-                st.error(f"解析并同步失败: {str(e)}")
+                st.error(f"解析并同步失败: {str(e)}")    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    # --- 1. 基础信息配置 ---
+    with st.container(border=True):
+        st.markdown("##### 👤 1. 基本信息")
+        c1, c2, c3 = st.columns([1.5, 2, 1.5])
+        school_name = c1.text_input("学校名称", value="辽宁石油化工大学")
+        # 【关键绑定】确保课程名称读取 session_state
+        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
+        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
+        
+        t1, t2, t3, t4 = st.columns(4)
+        teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
+        teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
+        academic_year = t3.text_input("学年 (如 2025-2026)", value="2025-2026")
+        semester = t4.selectbox("学期", ["1", "2"])
+
+    # --- 2. 学时与教材配置 ---
+    with st.container(border=True):
+        st.markdown("##### 📚 2. 学时分配与教材")
+        h1, h2, h3, h4 = st.columns(4)
+        total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
+        # 修正 2：本学期总学时 (关键：不要直接绑定 local 变量 total_hours)
+        term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('term_hours', total_hours)))
+        total_weeks = h3.number_input("上课周数", value=12)
+        weekly_hours = h4.number_input("平均每周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
+        d1, d2, d3, d4, d5 = st.columns(5)
+        # 修正 3：各分项学时与课程性质
+        lec_h = d1.number_input("讲课学时", value=int(st.session_state.get('lecture_hours', total_hours)))
+        lab_h = d2.number_input("实验学时", value=int(st.session_state.get('lab_hours', 0)))
+        qui_h = d3.number_input("测验学时", value=int(st.session_state.get('quiz_hours', 0)))
+        ext_h = d4.number_input("课外学时", value=int(st.session_state.get('extra_hours', 0)))
+        course_nature = d5.text_input("课程性质", value=st.session_state.get('course_nature', "专业必修"))
+
+        st.markdown("---")
+        m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
+        # 【关键绑定】确保教材详情读取 session_state
+        book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
+        publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
+        pub_date = m3.text_input("出版时间", value=st.session_state.get('publish_date', ""))
+        book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
+        
+        ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
+        k1, k2 = st.columns(2)
+        assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
+                                 index=1 if st.session_state.get('assessment_method') == "考查" else 0)
+        grading_formula = k2.text_input("成绩计算方法", value=st.session_state.get("grading_formula", "总成绩=平时成绩 30%+考试成绩 70%"))
+
+    # --- 3. 备注与签名 ---
+    with st.container(border=True):
+        st.markdown("##### 📝 3. 其他信息")
+        n1, n2, n3 = st.columns(3)
+        note_1 = n1.text_input("备注1", value="在授课过程中，可能根据学生接受情况，微调课程进度")
+        note_2 = n2.text_input("备注2", value="遇到偶发情况需要调课，需履行调停课手续")
+        note_3 = n3.text_input("备注3", value="")
+        
+        teacher_sig_file = st.file_uploader("✍️ 上传/更换手写签名", type=['png', 'jpg'], key="t_sig_up")
+
+    # --- 4. 进度表编辑 (含学时拆分) ---
+    # st.divider()
+    # st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
+    # syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
+
+    # --- 4. 进度表编辑按钮逻辑 ---
+    #if st.button("🪄 依据大纲抽取并自动拆分学时"):
+
 
     if st.session_state.calendar_data:
         # 隐藏 source_text 以保持页面整洁，但保留在数据中
