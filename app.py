@@ -562,11 +562,58 @@ def page_calendar():
     elif user_role == "系主任": render_approval_view("Head")
     else: render_approval_view("Dean")
 
-    # --- 状态流转监控 ---
+# --- 7. 审批过程实时显示 (新增模块) ---
     st.divider()
-    status_map = {"Draft": 0, "Pending_Head": 33, "Pending_Dean": 66, "Approved": 100}
+    st.markdown("##### 🚥 教学日历审批进度监控")
+    
+    # 定义状态映射与进度百分比
+    status_map = {
+        "Draft": {"val": 10, "label": "草拟中", "color": "gray"},
+        "Pending_Head": {"val": 40, "label": "待教研室主任审批", "color": "blue"},
+        "Pending_Dean": {"val": 70, "label": "待学院主管领导审批", "color": "orange"},
+        "Approved": {"val": 100, "label": "审批已通过", "color": "green"}
+    }
+    
     curr_status = st.session_state.get("calendar_status", "Draft")
-    st.progress(status_map.get(curr_status, 0))
+    progress_info = status_map.get(curr_status, status_map["Draft"])
+    
+    # 渲染进度条
+    st.progress(progress_info["val"])
+    
+    # 渲染可视化节点
+    n1, n2, n3, n4 = st.columns(4)
+    nodes = [("Draft", "草拟"), ("Pending_Head", "系主任审核"), ("Pending_Dean", "主管院长审批"), ("Approved", "完成归档")]
+    for i, (status_key, label) in enumerate(nodes):
+        col = [n1, n2, n3, n4][i]
+        if status_map[curr_status]["val"] >= status_map[status_key]["val"]:
+            col.success(f"● {label}")
+        else:
+            col.write(f"○ {label}")
+
+    # 审批结果与详细意见查看区域
+    with st.expander("📋 查看审批意见与结果详情", expanded=(curr_status != "Draft")):
+        if curr_status == "Draft":
+            st.info("💡 当前处于草拟阶段，尚未提交审批。")
+        else:
+            # 1. 教研室主任审批信息
+            st.markdown("**【教研室主任审批】**")
+            head_op = st.session_state.get("head_opinion", "等待处理...")
+            st.write(f"> 审批意见：{head_op}")
+            if "head_date" in st.session_state:
+                st.caption(f"审批时间：{st.session_state.head_date}")
+            if st.session_state.get("head_sign_img"):
+                st.image(st.session_state.head_sign_img, width=120, caption="系主任签名")
+            
+            st.divider()
+            
+            # 2. 学院领导审批信息
+            st.markdown("**【学院主管领导审批】**")
+            dean_op = st.session_state.get("dean_opinion", "等待处理...")
+            st.write(f"> 审批意见：{dean_op}")
+            if "dean_date" in st.session_state:
+                st.caption(f"审批时间：{st.session_state.dean_date}")
+            if st.session_state.get("dean_sign_img"):
+                st.image(st.session_state.dean_sign_img, width=120, caption="院长签名")
 
     # --- 下载区域 ---
     if curr_status == "Approved":
