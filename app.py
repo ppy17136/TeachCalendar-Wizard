@@ -430,15 +430,11 @@ def render_teacher_view():
     with st.container(border=True):
         st.markdown("##### 📚 2. 学时分配与教材")
         h1, h2, h3, h4 = st.columns(4)
-        
-        # 修正 1：总学时数
         total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
         # 修正 2：本学期总学时 (关键：不要直接绑定 local 变量 total_hours)
         term_hours = h2.number_input("本学期总学时", value=int(st.session_state.get('term_hours', total_hours)))
-        
         total_weeks = h3.number_input("上课周数", value=12)
         weekly_hours = h4.number_input("平均每周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
-
         d1, d2, d3, d4, d5 = st.columns(5)
         # 修正 3：各分项学时与课程性质
         lec_h = d1.number_input("讲课学时", value=int(st.session_state.get('lecture_hours', total_hours)))
@@ -456,7 +452,6 @@ def render_teacher_view():
         book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
         
         ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
-        
         k1, k2 = st.columns(2)
         assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
                                  index=1 if st.session_state.get('assessment_method') == "考查" else 0)
@@ -476,7 +471,6 @@ def render_teacher_view():
     st.divider()
     st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
     syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
-    
 
     # --- 4. 进度表编辑按钮逻辑 ---
     if st.button("🪄 依据大纲抽取并自动拆分学时"):
@@ -519,8 +513,6 @@ def render_teacher_view():
                     "grading_formula": "成绩计算方法"
                 }},
 
-
-
                 "schedule": [
                     {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 数字, "method": "方法", "other": "作业", "obj": "目标", "source_text": "大纲原文片段" }}
                 ]
@@ -553,13 +545,7 @@ def render_teacher_view():
                 st.session_state["textbook_remark"] = bi.get("textbook_remark", "") # 获奖情况
                 st.session_state["references_text"] = bi.get("references", "")
                 st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
-                
-                # 进度表逻辑同前...
-                st.rerun() # 强制刷新页面显示新值
-            except Exception as e:
-                st.error(f"解析并同步失败: {str(e)}")
 
-                
                 # 处理进度表
                 raw_schedule = full_data.get("schedule", [])
                 st.session_state.calendar_data = pd.DataFrame(raw_schedule).fillna("").astype(str).to_dict('records')
