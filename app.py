@@ -498,20 +498,25 @@ def render_teacher_view():
   
             {{
                 "base_info": {{
-                    "course_name": "精准提取‘一、课程基本信息’表中的‘课程名称’",
-                    "course_nature": "提取‘课程性质’",
+                    "course_name": "精准提取课程名称",
+                    "total_hours": 总学时数(数字),
+                    "term_hours": 本学期总学时(数字),
+                    "lecture_hours": 讲课学时(数字),
+                    "lab_hours": 实验学时(数字),
+                    "quiz_hours": 测验学时(数字),
+                    "extra_hours": 课外学时(数字),
                     "textbook_name": "教材名",
                     "publisher": "出版社",
-                    "publish_date": "出版时间(如2019)",
-                    "textbook_remark": "获奖情况(若无则为空)",
+                    "publish_date": "出版时间",
+                    "textbook_remark": "获奖情况(若无则填空字符串)",
                     "references": "参考书目字符串",
                     "assessment_method": "考查或考试",
-                    "grading_formula": "成绩计算方法",
-                    "lecture_hours": 讲课学时(数字),
-                    "lab_hours": 实验学时(数字)
-                    "quiz_hours": 测验学时(数字),
-                    "extra_hours": 课外学时(数字)                    
+                    "grading_formula": "成绩计算方法"
                 }},
+
+
+
+
 
                 "schedule": [
                     {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 数字, "method": "方法", "other": "作业", "obj": "目标", "source_text": "大纲原文片段" }}
@@ -529,17 +534,25 @@ def render_teacher_view():
                 bi = full_data.get("base_info", {})
                 
                 # 【核心修复】将提取到的值存入 session_state
+
+                # --- 核心修复：补全所有缺失的赋值项 ---
                 st.session_state["course_name"] = bi.get("course_name", "")
                 st.session_state["course_nature"] = bi.get("course_nature", "专业必修")
+                st.session_state["total_hours"] = bi.get("total_hours", 24)
+                st.session_state["term_hours"] = bi.get("term_hours", 24)
+                st.session_state["lecture_hours"] = bi.get("lecture_hours", 24)
+                st.session_state["lab_hours"] = bi.get("lab_hours", 0)
+                st.session_state["quiz_hours"] = bi.get("quiz_hours", 0)
+                st.session_state["extra_hours"] = bi.get("extra_hours", 0)
                 st.session_state["textbook_name"] = bi.get("textbook_name", "")
                 st.session_state["publisher"] = bi.get("publisher", "")
                 st.session_state["publish_date"] = bi.get("publish_date", "")
                 st.session_state["textbook_remark"] = bi.get("textbook_remark", "")
                 st.session_state["references_text"] = bi.get("references", "")
                 st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
-                st.session_state["grading_formula"] = bi.get("grading_formula", "")
-                st.session_state["lecture_hours"] = bi.get("lecture_hours", total_hours)
-                st.session_state["lab_hours"] = bi.get("lab_hours", 0)
+                
+                
+                
                 
                 # 处理进度表
                 raw_schedule = full_data.get("schedule", [])
