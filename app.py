@@ -409,11 +409,13 @@ def render_calendar_docx(template_path, data_dict, sig_images=None):
         return None
 
 def render_teacher_view():
-    q1, q2, q3, q4 = st.columns(4)
+    p1, p2, p3 = st.columns(3)
     #st.markdown("#### 📝 教师端：教学日历编报")
-    q1.markdown("#### 📝 教师端：教学日历编报")
-    syllabus_file = q3.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
-    q4button = q4.button("🪄 依据大纲抽取并自动拆分学时")
+    p1.markdown("#### 📝 教师端：教学日历编报")
+    syllabus_file = p3.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
+    q1, q2, q3 = st.columns(3)
+    q4button = q3.button("🪄 依据大纲抽取并自动拆分学时")
+    
     # --- 1. 基础信息配置 ---
     with st.container(border=True):
         st.markdown("##### 👤 1. 基本信息")
@@ -464,16 +466,16 @@ def render_teacher_view():
     with st.container(border=True):
         st.markdown("##### 📝 3. 其他信息")
         n1, n2, n3 = st.columns(3)
-        note_1 = n1.text_input("备注1", value="")
-        note_2 = n2.text_input("备注2", value="")
+        note_1 = n1.text_input("备注1", value="在授课过程中，可能根据学生接受情况，微调课程进度")
+        note_2 = n2.text_input("备注2", value="遇到偶发情况需要调课，需履行调停课手续")
         note_3 = n3.text_input("备注3", value="")
         
         teacher_sig_file = st.file_uploader("✍️ 上传/更换手写签名", type=['png', 'jpg'], key="t_sig_up")
 
     # --- 4. 进度表编辑 (含学时拆分) ---
-    st.divider()
-    st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
-    syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
+    # st.divider()
+    # st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
+    # syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
 
     # --- 4. 进度表编辑按钮逻辑 ---
     #if st.button("🪄 依据大纲抽取并自动拆分学时"):
