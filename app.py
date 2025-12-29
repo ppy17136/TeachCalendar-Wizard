@@ -31,6 +31,11 @@ if "calendar_status" not in st.session_state:
     st.session_state.calendar_status = "Draft" # 初始状态为草拟
 st.set_page_config(page_title="智能教学辅助系统", layout="wide", initial_sidebar_state="expanded")
 
+if "calendar_data" not in st.session_state:
+    st.session_state.calendar_data = []        # 进度表数据
+if "calendar_final_data" not in st.session_state:
+    st.session_state.calendar_final_data = None # 提交后的完整数据包
+    
 # --- 3. 密钥获取与侧边栏 ---
 BACKEND_QWEN_KEY = st.secrets.get("QWEN_API_KEY", "")
 BACKEND_GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
