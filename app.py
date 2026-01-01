@@ -1372,22 +1372,6 @@ def page_analysis():
         st.download_button("导出成绩记录 (CSV)", str(st.session_state.score_records), "scores.csv")
 
 # --- 7. 路由逻辑 ---
-route = {
-    "首页": page_home,
-    "大纲": page_syllabus,
-    "日历": page_calendar,
-    "方案": page_program,
-    "基座": page_base_plan,
-    "模板": page_template_tagger,
-    "批卷": page_grading,
-    "分析": page_analysis,
-    "设置": page_settings,
-}
-current = st.query_params.get("page", "首页")
-route.get(current, page_home)()
-
-
-
 # -----------------------------
 # Router (fix NameError)
 # -----------------------------
