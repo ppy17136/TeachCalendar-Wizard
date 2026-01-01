@@ -1393,9 +1393,9 @@ route.get(current, page_home)()
 # -----------------------------
 route = {
     "首页": lambda: page_home(),
-    "大纲": page_syllabus,
-    "日历": page_calendar,
-    "方案": page_program,    
+    "大纲": lambda: page_syllabus(),
+    "日历": lambda: page_calendar(),
+    "方案": lambda: page_program(),    
     "基座": lambda: page_base(),
     "模板": lambda: page_template_tagger(),
     "批卷": lambda: page_grading(),
