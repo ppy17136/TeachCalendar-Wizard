@@ -1385,3 +1385,23 @@ route = {
 }
 current = st.query_params.get("page", "首页")
 route.get(current, page_home)()
+
+
+
+# -----------------------------
+# Router (fix NameError)
+# -----------------------------
+route = {
+    "首页": lambda: page_home(),
+    "大纲": page_syllabus,
+    "日历": page_calendar,
+    "方案": page_program,    
+    "基座": lambda: page_base(),
+    "模板": lambda: page_template_tagger(),
+    "批卷": lambda: page_grading(),
+    "分析": lambda: page_analysis(),
+    "设置": lambda: page_settings(),  # ✅ 延迟到点击时才解析名字
+}
+
+current = st.query_params.get("page", "首页")
+route.get(current, lambda: page_home())()
