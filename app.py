@@ -1,836 +1,964 @@
-
-# app_mcp_manus.py
-# Teaching Agent Suite (MCP-style tools + Manus-style multi-step runner)
-# - Safe "MCP-like" tool registry (local tools)
-# - "Manus-like" task runner (multi-step pipelines calling tools)
-# - Base plan 1–11 extraction + appendix tables 7–10 extraction & MERGE across pages
-# - Template Tagger: convert uploaded DOCX into a tagged docxtpl template (best-effort)
-# - Fix Streamlit key collisions + sidebar logo rendering
-#
-# NOTE:
-# - This is NOT the official Manus product, and NOT a remote-VM controller.
-#   It implements the same *idea*: "agent -> call tools -> produce artifacts" in a safe, local way.
-
-from __future__ import annotations
-
-import io
-import re
-import json
-import time
-import base64
-import hashlib
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-import pandas as pd
+import os
 import streamlit as st
-import streamlit.components.v1 as components
 import pdfplumber
+import fitz  # PyMuPDF
 from docx import Document
-from docxtpl import DocxTemplate
+import mammoth
+import requests
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from openai import OpenAI
+import base64
+import io
+from PIL import Image
+import google.generativeai as genai
+import json
+from docxtpl import DocxTemplate  # 必须安装 docxtpl
+from datetime import datetime
+# 签名插入示例
+from docxtpl import InlineImage
+from docx.shared import Mm, Pt
+import pandas as pd  # 必须添加，用于数据类型清洗
 
-# Optional: keep your existing AI backends (Gemini / Qwen). If keys missing, app still runs.
-try:
-    import google.generativeai as genai
-except Exception:
-    genai = None
+# --- 1. 基础环境与配置 ---
+plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False
 
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
+# --- 2. 状态自动化初始化 (在 app.py 顶部) ---
+if "calendar_data" not in st.session_state:
+    st.session_state.calendar_data = [] # 初始化为空列表，防止 AttributeError
+if "calendar_status" not in st.session_state:
+    st.session_state.calendar_status = "Draft" # 初始状态为草拟
+if "calendar_final_data" not in st.session_state:
+    st.session_state.calendar_final_data = None # 提交后的完整数据包
+
+st.set_page_config(page_title="智能教学辅助系统", layout="wide", initial_sidebar_state="expanded")
+
+# --- 状态自动化初始化 (防止变量未定义报错) ---
+if "school_name" not in st.session_state:
+    st.session_state.school_name = "辽宁石油化工大学" # 给一个初始默认值
+    
+# --- 3. 密钥获取与侧边栏 ---
+BACKEND_QWENM_KEY = st.secrets.get("QWENM_API_KEY", "")
+BACKEND_QWEN_KEY = st.secrets.get("QWEN_API_KEY", "")
+BACKEND_GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+BACKEND_GLM_KEY = st.secrets.get("GLM_API_KEY", "")
+BACKEND_BAIDU_KEY = st.secrets.get("BAIDU_API_KEY", "")
+BACKEND_KIMI_KEY = st.secrets.get("KIMI_API_KEY", "")
+
+# --- 2. 状态自动化初始化 (防止变量未定义报错) ---
+# 初始化全局会话状态
+if "score_records" not in st.session_state:
+    st.session_state.score_records = []
+if "generated_syllabus" not in st.session_state:
+    st.session_state.generated_syllabus = None
+if "generated_calendar" not in st.session_state:
+    st.session_state.generated_calendar = None
+if "generated_program" not in st.session_state:
+    st.session_state.generated_program = None
+# 使用 setdefault 确保变量一定存在
+st.session_state.setdefault("score_records", [])
+st.session_state.setdefault("gen_content", {"syllabus": None, "calendar": None, "program": None})
+# --- 3. 侧边栏：引擎切换与密钥管理 ---
+with st.sidebar:
+    st.header("⚙️ 模型引擎设置")
+    providers = ["Qwen (摩搭)", "Qwen (通义千问)", "Baidu (文心一言)", "Kimi (Moonshot)", "GLM (智谱)", "Gemini"]
+    # 默认选择 Gemini (索引为 3) 
+    selected_provider = st.radio("选择主 AI 引擎", providers, index=5)
+    ACTIVE_QWENM_KEY = BACKEND_QWENM_KEY
+    ACTIVE_QWEN_KEY = BACKEND_QWEN_KEY
+    ACTIVE_GEMINI_KEY = BACKEND_GEMINI_KEY
+    ACTIVE_BAIDU_KEY = BACKEND_BAIDU_KEY
+    ACTIVE_KIMI_KEY = BACKEND_KIMI_KEY
+    ACTIVE_GLM_KEY = BACKEND_GLM_KEY
+      
+            
+    if selected_provider == "Gemini":
+        user_gem_key = st.text_input("填写 Gemini API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_gem_key: ACTIVE_GEMINI_KEY = user_gem_key
+        selected_model = st.selectbox("版本", ["gemini-2.5-flash", "gemini-2.0-flash-exp", "gemini-2.5-pro", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="gemini-2.5-pro")          
+        engine_id = "Gemini"
+        if ACTIVE_GEMINI_KEY: genai.configure(api_key=ACTIVE_GEMINI_KEY)
+        if not ACTIVE_GEMINI_KEY: st.error("⚠️ 未检测到有效Gemini Key") 
+
+        
+    elif selected_provider == "Qwen (摩搭)":
+        user_qw_key = st.text_input("填写 Qwen API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_qw_key: ACTIVE_QWENM_KEY = user_qw_key
+        selected_model = st.selectbox("版本", ["Qwen/Qwen3-VL-8B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Instruct", "Qwen/Qwen3-VL-235B-A22B-Instruct",  "Qwen/Qwen2.5-VL-7B-Instruct", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="Qwen/Qwen3-VL-8B-Instruct")         
+        engine_id = "QwenM"
+        if not ACTIVE_QWENM_KEY: st.error("⚠️ 未检测到有效通义千问 Key")    
+
+    elif selected_provider == "Qwen (通义千问)":
+        user_qw_key = st.text_input("填写 Qwen API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_qw_key: ACTIVE_QWEN_KEY = user_qw_key
+        selected_model = st.selectbox("版本", ["qwen-plus", "qwen-max", "qwen-turbo", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="qwen-max")         
+        engine_id = "Qwen"
+        if not ACTIVE_QWEN_KEY: st.error("⚠️ 未检测到有效通义千问 Key")  
+
+    elif selected_provider == "Baidu (文心一言)":
+        user_bd_key = st.text_input("填写百度千帆 API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_bd_key: ACTIVE_BAIDU_KEY = user_bd_key
+        # 百度常用的 OpenAI 兼容模型名
+        selected_model = st.selectbox("版本", ["ERNIE-4.5-Turbo-Latest", "ERNIE-4.5-Turbo-128K", "ERNIE-4.5-Turbo-32K", "ERNIE-4.5-Turbo", "ERNIE-4.5-Turbo-VL-Latest", "ERNIE-4.5-Turbo-VL-32K", "ERNIE-4.5-Turbo-VL", "ERNIE-5.0-Thinking-Latest", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="ERNIE-5.0-Thinking-Preview")         
+        engine_id = "Baidu"
+        if not ACTIVE_BAIDU_KEY: st.error("⚠️ 未检测到有效百度 Key")
+
+    elif selected_provider == "Kimi (Moonshot)":
+        user_km_key = st.text_input("填写 Kimi API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_km_key: ACTIVE_KIMI_KEY = user_km_key
+        selected_model = st.selectbox("版本", ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-k2-thinking", "kimi-k2-thinking-turbo", "kimi-latest", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="kimi-latest")        
+        engine_id = "Kimi"
+        if not ACTIVE_KIMI_KEY: st.error("⚠️ 未检测到有效 Kimi Key") 
+        
+    elif selected_provider == "GLM (智谱)":
+        user_glm_key = st.text_input("填写 GLM API Key (可选)", type="password", help="留空则使用后台默认 Key")
+        if user_glm_key: ACTIVE_GLM_KEY = user_glm_key
+        # 智谱模型名可能会更新，这里给常用项 + 自定义
+        selected_model = st.selectbox("版本", ["glm-4.5-flash", "glm-4.7", "glm-4.6", "glm-4.5-air", "glm-4.5-airx", "自定义..."])
+        if selected_model == "自定义...":
+            selected_model = st.text_input("Model（自定义输入）", value="glm-4.7")
+        engine_id = "GLM"
+        if not ACTIVE_GLM_KEY: st.error("⚠️ 未检测到有效 GLM Key")      
+        
+    st.divider()
+    st.info(f"💡 当前模式：使用 **{engine_id}** 处理。")
+    # 侧边栏底部也可以加提示
+    st.caption("🖥️ 建议环境：Google Chrome 浏览器")
+    
+    st.divider()
+    st.markdown("### 📖 官方资源")
+    st.link_button("📺 官方教程", "https://telyon.click")
+    st.link_button("💰 赞助支持", "https://telyon.click/donate")
+    st.info("提示：教程站内有详细的 Prompt 编写指南。")
 
 
-# =========================
-# 0) Basic helpers
-# =========================
-def _now_str() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-def _short_id(s: str) -> str:
-    return hashlib.md5(s.encode("utf-8")).hexdigest()[:10]
-
-def _safe_text(x: Any) -> str:
-    return "" if x is None else str(x).strip()
-
-def _compact_lines(s: str) -> str:
-    s = (s or "").replace("\u00a0", " ")
-    s = re.sub(r"[ \t]+", " ", s)
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s.strip()
-
-def payload_to_jsonable(obj: Any) -> Any:
-    """Make payload JSON-serializable (prevents json.dumps TypeError)."""
-    # pandas
-    if isinstance(obj, pd.DataFrame):
-        df = obj.copy().fillna("")
-        return {
-            "__type__": "dataframe",
-            "columns": [str(c) for c in df.columns.tolist()],
-            "data": df.astype(str).values.tolist(),
-        }
-    # bytes
-    if isinstance(obj, (bytes, bytearray)):
-        return {"__type__": "bytes_base64", "data": base64.b64encode(bytes(obj)).decode("ascii")}
-    # datetime-like
-    try:
-        import datetime as _dt
-        if isinstance(obj, (_dt.date, _dt.datetime)):
-            return obj.isoformat()
-    except Exception:
-        pass
-    # numpy scalars/arrays
-    try:
-        import numpy as np
-        if isinstance(obj, (np.integer, np.floating, np.bool_)):
-            return obj.item()
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-    except Exception:
-        pass
-    # dict/list/tuple/set
-    if isinstance(obj, dict):
-        return {str(k): payload_to_jsonable(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [payload_to_jsonable(v) for v in obj]
-    if isinstance(obj, (tuple, set)):
-        return [payload_to_jsonable(v) for v in obj]
-    # fallback
-    try:
-        json.dumps(obj)
-        return obj
-    except Exception:
-        return str(obj)
+    st.divider()
+    st.markdown("### ✉️ 联系我们")
+    st.caption("BUG 反馈 / 合作意向：")
+    st.code("839146331@qq.com", language=None) # 使用 st.code 方便用户一键点击复制
 
 
-# =========================
-# 1) MCP-style Tool Registry (LOCAL tools)
-# =========================
-@dataclass
-class ToolSpec:
-    name: str
-    description: str
-    input_schema: Dict[str, Any]  # JSON-schema-ish (lightweight)
-    handler: Callable[[Dict[str, Any]], Dict[str, Any]]
+# --- 4. 核心功能函数 --- 
+def create_docx(text):
+    if text is None:
+        text = "内容为空"  # 或者直接返回 None    
+    doc = Document()
+    
+    # 1. 首先通过正则表达式清除所有 HTML 标签 (如 <br/>)
+    # 2. 接着通过链式 replace 清除 Markdown 的标题号和加粗符号
+    clean_text = re.sub('<[^<]+?>', '', text) \
+                   .replace("### ", "") \
+                   .replace("## ", "") \
+                   .replace("# ", "") \
+                   .replace("**", "")
+    
+    # 写入 Word
+    for line in clean_text.split('\n'):
+        if line.strip(): # 过滤掉多余的空行
+            p = doc.add_paragraph(line)
+            p.style.font.size = Pt(12)
+    
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
 
-class ToolRegistry:
-    def __init__(self) -> None:
-        self._tools: Dict[str, ToolSpec] = {}
 
-    def register(self, tool: ToolSpec) -> None:
-        self._tools[tool.name] = tool
 
-    def list_tools(self) -> List[Dict[str, Any]]:
-        return [{
-            "name": t.name,
-            "description": t.description,
-            "input_schema": t.input_schema
-        } for t in self._tools.values()]
-
-    def call_tool(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        if name not in self._tools:
-            return {"ok": False, "error": f"Unknown tool: {name}"}
+def ai_generate(prompt, provider, model_name):
+    """统一文本生成接口，支持多模型路由 """
+    # 1. 官方 SDK 处理 (Gemini) 
+    if provider == "Gemini":
+        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
         try:
-            return self._tools[name].handler(args or {})
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e: return f"Gemini 失败: {str(e)}"
 
-
-# =========================
-# 2) Manus-style Task Runner (pipelines calling tools)
-# =========================
-@dataclass
-class TaskStep:
-    tool: str
-    args: Dict[str, Any]
-    save_as: Optional[str] = None  # store result in context
-
-class TaskRunner:
-    """Manus-like: run multiple steps (tools) deterministically and safely."""
-    def __init__(self, registry: ToolRegistry):
-        self.registry = registry
-
-    def run(self, steps: List[TaskStep]) -> Dict[str, Any]:
-        ctx: Dict[str, Any] = {}
-        logs: List[Dict[str, Any]] = []
-
-        for i, step in enumerate(steps, start=1):
-            # allow simple templating from ctx: "{{key}}"
-            args = _ctx_format(step.args, ctx)
-            res = self.registry.call_tool(step.tool, args)
-            logs.append({"step": i, "tool": step.tool, "args": _safe_preview(args), "result_ok": res.get("ok", False)})
-            if not res.get("ok"):
-                return {"ok": False, "error": res.get("error", "unknown"), "logs": logs, "ctx": ctx}
-            if step.save_as:
-                ctx[step.save_as] = res
-        return {"ok": True, "logs": logs, "ctx": ctx}
-
-def _ctx_format(obj: Any, ctx: Dict[str, Any]) -> Any:
-    if isinstance(obj, str):
-        # replace {{key}} with ctx[key] (stringified)
-        def repl(m):
-            k = m.group(1).strip()
-            return str(ctx.get(k, m.group(0)))
-        return re.sub(r"\{\{([^}]+)\}\}", repl, obj)
-    if isinstance(obj, dict):
-        return {k: _ctx_format(v, ctx) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_ctx_format(v) for v in obj]
-    return obj
-
-def _safe_preview(args: Dict[str, Any]) -> Dict[str, Any]:
-    out = {}
-    for k, v in (args or {}).items():
-        if isinstance(v, (bytes, bytearray)):
-            out[k] = f"<bytes:{len(v)}>"
-        else:
-            out[k] = v if len(str(v)) < 300 else str(v)[:300] + "..."
-    return out
-
-
-# =========================
-# 3) Base plan extraction (1–11) + appendix tables (7–10) + merge across pages
-# =========================
-_SECTION_PATTERNS: List[Tuple[str, List[str]]] = [
-    ("1", [r"一[、\.\s]*培养目标", r"1[、\.\s]*培养目标"]),
-    ("2", [r"二[、\.\s]*毕业要求", r"2[、\.\s]*毕业要求"]),
-    ("3", [r"三[、\.\s]*专业定位与特色", r"3[、\.\s]*专业定位与特色"]),
-    ("4", [r"四[、\.\s]*主干学科", r"4[、\.\s]*主干学科"]),
-    ("5", [r"五[、\.\s]*标准学制", r"5[、\.\s]*标准学制"]),
-    ("6", [r"六[、\.\s]*毕业条件", r"6[、\.\s]*毕业条件"]),
-    ("7", [r"七[、\.\s]*专业教学计划表", r"7[、\.\s]*专业教学计划表"]),
-    ("8", [r"八[、\.\s]*学分统计表", r"8[、\.\s]*学分统计表"]),
-    ("9", [r"九[、\.\s]*教学进程表", r"9[、\.\s]*教学进程表"]),
-    ("10", [r"十[、\.\s]*课程设置对毕业要求支撑关系表", r"10[、\.\s]*课程设置对毕业要求支撑关系表"]),
-    ("11", [r"十一[、\.\s]*课程设置逻辑思维导图", r"11[、\.\s]*课程设置逻辑思维导图"]),
-]
-
-def _read_pdf_pages_text(pdf_bytes: bytes) -> List[str]:
-    pages = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for p in pdf.pages:
-            txt = p.extract_text() or ""
-            pages.append(_compact_lines(txt))
-    return pages
-
-def _join_pages(pages_text: List[str]) -> str:
-    return _compact_lines("\n\n".join([t or "" for t in pages_text]))
-
-def _build_section_spans(full_text: str) -> Dict[str, Tuple[int, int]]:
-    hits: List[Tuple[str, int]] = []
-    for sec_id, pats in _SECTION_PATTERNS:
-        pos = None
-        for pat in pats:
-            m = re.search(pat, full_text)
-            if m:
-                pos = m.start()
-                break
-        if pos is not None:
-            hits.append((sec_id, pos))
-
-    hits.sort(key=lambda x: x[1])
-    spans: Dict[str, Tuple[int, int]] = {}
-    for i, (sec_id, start) in enumerate(hits):
-        end = hits[i + 1][1] if i + 1 < len(hits) else len(full_text)
-        spans[sec_id] = (start, end)
-    return spans
-
-def _extract_section_text(full_text: str, spans: Dict[str, Tuple[int, int]], sec_id: str) -> str:
-    if sec_id not in spans:
-        return ""
-    s, e = spans[sec_id]
-    chunk = full_text[s:e].strip()
-    chunk = re.sub(r"^\s*(一|二|三|四|五|六|七|八|九|十|十一|\d+)[、\.\s]*[^\n]{0,40}\n", "", chunk)
-    return _compact_lines(chunk)
-
-def _valid_table_settings_lines() -> dict:
-    return dict(
-        vertical_strategy="lines",
-        horizontal_strategy="lines",
-        snap_tolerance=3,
-        join_tolerance=3,
-        edge_min_length=3,
-        intersection_tolerance=3,
-        text_tolerance=3,
-    )
-
-def _extract_tables_from_pages(pdf_bytes: bytes, page_idx_list: List[int]) -> List[Tuple[int, List[List[str]]]]:
-    out: List[Tuple[int, List[List[str]]]] = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for idx in page_idx_list:
-            if idx < 0 or idx >= len(pdf.pages):
-                continue
-            page = pdf.pages[idx]
-            tables = []
-            try:
-                tables = page.extract_tables(table_settings=_valid_table_settings_lines()) or []
-            except TypeError:
-                tables = page.extract_tables() or []
-            except Exception:
-                try:
-                    tables = page.extract_tables() or []
-                except Exception:
-                    tables = []
-
-            for t in tables:
-                norm = []
-                for row in t:
-                    norm.append([_safe_text(c) for c in row])
-                out.append((idx, norm))
-    return out
-
-def _dedup_cols(cols: List[str]) -> List[str]:
-    seen: Dict[str, int] = {}
-    out: List[str] = []
-    for c in cols:
-        c0 = (c or "").strip() or "列"
-        if c0 not in seen:
-            seen[c0] = 1
-            out.append(c0)
-        else:
-            seen[c0] += 1
-            out.append(f"{c0}_{seen[c0]}")
-    return out
-
-def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame()
-    df = df.copy()
-    df.replace({None: ""}, inplace=True)
-    df = df.applymap(lambda x: "" if str(x).strip().lower() == "nan" else str(x).strip())
-    df = df.loc[~df.apply(lambda r: all((str(x).strip() == "") for x in r), axis=1)]
-    df = df.loc[:, ~df.apply(lambda c: all((str(x).strip() == "") for x in c), axis=0)]
-    return df.reset_index(drop=True)
-
-def _table_to_df(table_rows: List[List[str]]) -> pd.DataFrame:
-    rows = [r for r in table_rows if any(_safe_text(x) for x in r)]
-    if not rows:
-        return pd.DataFrame()
-    max_cols = max(len(r) for r in rows)
-    rows = [r + [""] * (max_cols - len(r)) for r in rows]
-
-    header = rows[0]
-    header_join = " ".join(header)
-    header_like = any(k in header_join for k in ["课程", "学分", "周次", "指标", "支撑", "合计", "课程编码", "课程名称"])
-    if header_like:
-        cols = [c if c else f"列{i+1}" for i, c in enumerate(header)]
-        df = pd.DataFrame(rows[1:], columns=_dedup_cols(cols))
-    else:
-        cols = [f"列{i+1}" for i in range(max_cols)]
-        df = pd.DataFrame(rows, columns=cols)
-    return _clean_df(df)
-
-def _table_signature_text(df: pd.DataFrame) -> str:
-    if df is None or df.empty:
-        return ""
-    head = " ".join([str(c) for c in df.columns.tolist()])
-    top_rows = []
-    for i in range(min(3, len(df))):
-        top_rows.append(" ".join([str(x) for x in df.iloc[i].tolist()]))
-    return (head + " " + " ".join(top_rows)).lower()
-
-def _classify_table(df: pd.DataFrame) -> Tuple[str, int]:
-    s = _table_signature_text(df)
-    score7 = sum(3 for k in ["课程编码", "课程代码", "课程名称", "学分", "总学时", "考核", "开课"] if k in s)
-    score8 = sum(3 for k in ["学分统计", "必修", "选修", "通识", "专业", "实践", "合计", "小计"] if k in s)
-    score9 = sum(3 for k in ["周次", "教学内容", "进度", "章节", "学时", "实验"] if k in s)
-    score10 = sum(3 for k in ["毕业要求", "指标点", "支撑", "达成", "对应", "课程设置对毕业要求"] if k in s)
-    best = max([("7", score7), ("8", score8), ("9", score9), ("10", score10)], key=lambda x: x[1])
-    return best if best[1] >= 6 else ("", 0)
-
-def _merge_dfs_same_header(dfs: List[pd.DataFrame]) -> pd.DataFrame:
-    if not dfs:
-        return pd.DataFrame()
-    base_cols = [str(c) for c in dfs[0].columns.tolist()]
-    merged = dfs[0].copy()
-    for df in dfs[1:]:
-        cols = [str(c) for c in df.columns.tolist()]
-        if cols != base_cols:
-            continue
-        def row_is_header_like(row: pd.Series) -> bool:
-            row_txt = " ".join([str(x) for x in row.tolist()]).strip().lower()
-            hits = sum(1 for c in base_cols if str(c).strip().lower() in row_txt)
-            return hits >= max(2, len(base_cols)//3)
-        df = df.loc[~df.apply(row_is_header_like, axis=1)].reset_index(drop=True)
-        merged = pd.concat([merged, df], ignore_index=True)
-    return _clean_df(merged)
-
-def extract_appendix_tables_best_effort(pdf_bytes: bytes, pages_text: List[str]) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Any]]:
-    n = len(pages_text)
-    tail_pages = list(range(max(0, n - 16), n))
-    raw_tables = _extract_tables_from_pages(pdf_bytes, tail_pages)
-
-    dfs: List[Tuple[int, pd.DataFrame]] = []
-    for page_idx, t in raw_tables:
-        df = _table_to_df(t)
-        if df is None or df.empty:
-            continue
-        if df.shape[0] < 2 and df.shape[1] < 3:
-            continue
-        dfs.append((page_idx, df))
-
-    scored: List[Tuple[int, int, str, int]] = []
-    for i, (pidx, df) in enumerate(dfs):
-        sec, score = _classify_table(df)
-        if sec:
-            scored.append((pidx, i, sec, score))
-
-    grouped: Dict[str, List[Tuple[int, pd.DataFrame, int]]] = {}
-    for pidx, i, sec, score in scored:
-        grouped.setdefault(sec, []).append((pidx, dfs[i][1], score))
-
-    assigned: Dict[str, pd.DataFrame] = {}
-    merged_info: Dict[str, Any] = {}
-
-    for sec, items in grouped.items():
-        items.sort(key=lambda x: (x[0], -x[2]))
-        first_cols = [str(c) for c in items[0][1].columns.tolist()]
-        merge_list = [items[0][1]]
-        used_pages = [items[0][0]]
-        for pidx, df, score in items[1:]:
-            cols = [str(c) for c in df.columns.tolist()]
-            if cols == first_cols:
-                merge_list.append(df)
-                used_pages.append(pidx)
-        assigned[sec] = _merge_dfs_same_header(merge_list)
-        merged_info[sec] = {"pages": sorted(list(set(used_pages))), "parts": len(merge_list), "shape": list(assigned[sec].shape)}
-
-    debug = {
-        "tail_pages": tail_pages,
-        "raw_tables_count": len(raw_tables),
-        "dfs_count": len(dfs),
-        "grouped": {k: len(v) for k, v in grouped.items()},
-        "merged": merged_info,
+    # 2. OpenAI 兼容协议处理 (Qwen, Baidu, Kimi) 
+    config = {
+        "Qwen": {"key": ACTIVE_QWEN_KEY, "url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+        "QwenM": {"key": ACTIVE_QWENM_KEY, "url": "https://api-inference.modelscope.cn/v1"},
+        "Baidu": {"key": ACTIVE_BAIDU_KEY, "url": "https://qianfan.baidubce.com/v2"},
+        "Kimi": {"key": ACTIVE_KIMI_KEY, "url": "https://api.moonshot.cn/v1"},
+        "GLM": {"key": ACTIVE_GLM_KEY, "url": "https://open.bigmodel.cn/api/paas/v4"}
     }
-    return assigned, debug
-
-def base_plan_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
-    pages = _read_pdf_pages_text(pdf_bytes)
-    full = _join_pages(pages)
-    spans = _build_section_spans(full)
-
-    base: Dict[str, str] = {}
-    for sec_id, _ in _SECTION_PATTERNS:
-        base[sec_id] = _extract_section_text(full, spans, sec_id)
-
-    for sec_id in ["7", "8", "9", "10", "11"]:
-        if not base.get(sec_id, "").strip():
-            base[sec_id] = f"{sec_id}：正文可能仅有标题；请尝试从 PDF 末尾附表自动抽取。"
-
-    auto_tables, debug_meta = extract_appendix_tables_best_effort(pdf_bytes, pages)
-
-    return {
-        "pages": pages,
-        "full_text": full,
-        "sections": base,
-        "tables": auto_tables,
-        "debug": debug_meta,
-    }
-
-
-# =========================
-# 4) Template Tagger (DOCX -> docxtpl template, best-effort)
-# =========================
-_TAG_MAP = {
-    "学校名称": "school_name",
-    "学年": "academic_year",
-    "学期": "semester",
-    "课程名称": "course_name",
-    "课程英文名称": "english_name",
-    "课程代码": "course_code",
-    "课程编码": "course_code",
-    "适用专业": "class_info",
-    "适用专业及年级": "class_info",
-    "主讲教师": "teacher_name",
-    "职称": "teacher_title",
-    "总学时": "total_hours",
-    "本学期总学时": "term_hours",
-    "上课周数": "total_weeks",
-    "平均每周学时": "weekly_hours",
-    "讲课学时": "lecture_hours",
-    "实验学时": "lab_hours",
-    "测验学时": "quiz_hours",
-    "课外学时": "extra_hours",
-    "课程性质": "course_nature",
-    "教材名称": "textbook_name",
-    "出版社": "publisher",
-    "出版时间": "publish_date",
-    "考核方式": "assessment_method",
-    "成绩计算方法": "grading_formula",
-    "备注": "note_1",
-    "备注1": "note_1",
-    "备注2": "note_2",
-    "备注3": "note_3",
-}
-
-_SCHEDULE_HEADERS = ["周次", "课次", "教学内容", "重点", "学习重点", "学时", "教学方法", "支撑目标", "作业", "其它"]
-
-def tag_docx_to_template(docx_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
-    doc = Document(io.BytesIO(docx_bytes))
-    tags_used: Dict[str, int] = {}
-
-    def use_tag(tag: str):
-        tags_used[tag] = tags_used.get(tag, 0) + 1
-
-    # tables
-    for tbl in doc.tables:
-        header_text = " ".join([c.text.strip() for c in tbl.rows[0].cells]) if len(tbl.rows) else ""
-        header_hit = sum(1 for h in _SCHEDULE_HEADERS if h in header_text)
-        is_schedule_like = header_hit >= 3
-
-        if is_schedule_like and len(tbl.rows) >= 2:
-            tpl_row = tbl.rows[1]
-            cols = len(tpl_row.cells)
-
-            tpl_row.cells[0].text = "{% for r in schedule %}"
-            tpl_row.cells[-1].text = "{% endfor %}"
-
-            headers = [c.text.strip() for c in tbl.rows[0].cells]
-            for j in range(cols):
-                if j == 0 or j == cols - 1:
-                    continue
-                h = headers[j] if j < len(headers) else ""
-                key = None
-                if "周次" in h:
-                    key = "week"
-                elif "课次" in h:
-                    key = "sess"
-                elif "教学内容" in h:
-                    key = "content"
-                elif "重点" in h:
-                    key = "req"
-                elif "学时" in h:
-                    key = "hrs"
-                elif "方法" in h:
-                    key = "method"
-                elif "支撑" in h:
-                    key = "obj"
-                elif "作业" in h or "其它" in h:
-                    key = "other"
-                if key:
-                    tpl_row.cells[j].text = "{{ r." + key + " }}"
-                    use_tag(f"schedule[].{key}")
-
-            while len(tbl.rows) > 2:
-                tbl._tbl.remove(tbl.rows[2]._tr)
-            continue
-
-        for row in tbl.rows:
-            if len(row.cells) < 2:
-                continue
-            label = row.cells[0].text.strip()
-            if label in _TAG_MAP:
-                tag = _TAG_MAP[label]
-                row.cells[1].text = "{{ " + tag + " }}"
-                use_tag(tag)
-
-    # paragraphs
-    for p in doc.paragraphs:
-        txt = p.text.strip()
-        if "{{" in txt:
-            continue
-        m = re.match(r"^(.{2,12})[：:]\s*(.+)$", txt)
-        if not m:
-            continue
-        label = m.group(1).strip()
-        if label in _TAG_MAP:
-            tag = _TAG_MAP[label]
-            p.text = f"{label}：{{{{ {tag} }}}}"
-            use_tag(tag)
-
-    out = io.BytesIO()
-    doc.save(out)
-    meta = {"tags_used": tags_used, "note": "自动打标为 best-effort；未命中的字段可手工改成 {{标签}}。"}
-    return out.getvalue(), meta
-
-
-# =========================
-# 5) Register tools
-# =========================
-@dataclass
-class ToolSpec:
-    name: str
-    description: str
-    input_schema: Dict[str, Any]
-    handler: Callable[[Dict[str, Any]], Dict[str, Any]]
-
-class ToolRegistry:
-    def __init__(self) -> None:
-        self._tools: Dict[str, ToolSpec] = {}
-
-    def register(self, tool: ToolSpec) -> None:
-        self._tools[tool.name] = tool
-
-    def list_tools(self) -> List[Dict[str, Any]]:
-        return [{"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in self._tools.values()]
-
-    def call_tool(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        if name not in self._tools:
-            return {"ok": False, "error": f"Unknown tool: {name}"}
-        try:
-            return self._tools[name].handler(args or {})
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-def build_registry() -> ToolRegistry:
-    reg = ToolRegistry()
-
-    def tool_extract_base(args: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            b = base64.b64decode(args["pdf_bytes"])
-            payload = base_plan_from_pdf(b)
-            return {"ok": True, "payload": payload}
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-    def tool_tag_docx(args: Dict[str, Any]) -> Dict[str, Any]:
-        try:
-            b = base64.b64decode(args["docx_bytes"])
-            tpl_bytes, meta = tag_docx_to_template(b)
-            return {"ok": True, "template_bytes": base64.b64encode(tpl_bytes).decode("ascii"), "meta": meta}
-        except Exception as e:
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-    reg.register(ToolSpec(
-        name="base.extract_from_pdf",
-        description="Extract base plan sections (1–11) + appendix tables (7–10) from PDF bytes.",
-        input_schema={"type":"object","properties":{"pdf_bytes":{"type":"string","description":"base64 of PDF bytes"}},"required":["pdf_bytes"]},
-        handler=tool_extract_base
-    ))
-
-    reg.register(ToolSpec(
-        name="template.tag_docx",
-        description="Convert a DOCX to a docxtpl template by inserting {{tags}} (best-effort).",
-        input_schema={"type":"object","properties":{"docx_bytes":{"type":"string","description":"base64 of DOCX bytes"}},"required":["docx_bytes"]},
-        handler=tool_tag_docx
-    ))
-
-    return reg
-
-
-# =========================
-# 6) Manus-style Task Runner (pipelines)
-# =========================
-@dataclass
-class TaskStep:
-    tool: str
-    args: Dict[str, Any]
-    save_as: Optional[str] = None
-
-class TaskRunner:
-    def __init__(self, registry: ToolRegistry):
-        self.registry = registry
-
-    def run(self, steps: List[TaskStep]) -> Dict[str, Any]:
-        ctx: Dict[str, Any] = {}
-        logs: List[Dict[str, Any]] = []
-        for i, step in enumerate(steps, start=1):
-            res = self.registry.call_tool(step.tool, step.args)
-            logs.append({"step": i, "tool": step.tool, "ok": res.get("ok", False)})
-            if not res.get("ok"):
-                return {"ok": False, "error": res.get("error", "unknown"), "logs": logs}
-            if step.save_as:
-                ctx[step.save_as] = res
-        return {"ok": True, "ctx": ctx, "logs": logs}
-
-
-# =========================
-# 7) Streamlit UI
-# =========================
-def _init_state():
-    st.session_state.setdefault("active_page", "首页")
-    st.session_state.setdefault("logo_bytes", None)
-
-    st.session_state.setdefault("project_id", _short_id(_now_str()))
-    st.session_state.setdefault("project_updated_at", _now_str())
-
-    st.session_state.setdefault("base_payload", None)
-    st.session_state.setdefault("base_tables_edited", {})
-
-    st.session_state.setdefault("tagger_last_meta", None)
-    st.session_state.setdefault("tagger_last_template_bytes", None)
-
-def ui_sidebar_brand():
-    with st.sidebar:
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.session_state.logo_bytes:
-                st.image(st.session_state.logo_bytes, width=44)
-            else:
-                components.html(
-                    """<div style="width:44px;height:44px;border-radius:50%;
-                                background:#2f6fed;display:flex;align-items:center;justify-content:center;
-                                color:white;font-weight:800;font-family:Arial;">TA</div>""",
-                    height=52
-                )
-        with col2:
-            st.markdown("**Teaching Agent Suite**")
-            st.caption("MCP tools + Manus runner (local)")
-
-        up = st.file_uploader("上传 Logo（可选）", type=["png","jpg","jpeg"], key="logo_uploader")
-        if up is not None:
-            st.session_state.logo_bytes = up.getvalue()
-
-def ui_sidebar_nav():
-    with st.sidebar:
-        st.divider()
-        st.session_state.active_page = st.radio(
-            "导航",
-            ["首页", "基座", "模板打标", "工具/MCP"],
-            index=["首页","基座","模板打标","工具/MCP"].index(st.session_state.active_page),
-            key="nav_radio"
+    
+    target = config.get(provider)
+    if not target or not target["key"]:
+        return f"错误：未配置 {provider} 密钥"
+    
+    try:
+        # 利用 OpenAI 库的兼容性一键切换 
+        client = OpenAI(api_key=target["key"], base_url=target["url"])
+        completion = client.chat.completions.create(
+            model=model_name, 
+            messages=[{"role": "user", "content": prompt}]
         )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"{provider} 生成失败: {str(e)}"
 
-def render_top_header():
-    pid = st.session_state.project_id
-    updated = st.session_state.project_updated_at
-    st.markdown(
-        f"""<div style="border:1px solid #e7eefc;background:#f6f9ff;padding:14px 16px;border-radius:14px;">
-            <div style="font-weight:900;font-size:26px;">智能教学辅助系统（MCP + Manus 风格）</div>
-            <div style="color:#666;margin-top:4px;font-size:13px;">项目ID：<b>{pid}</b> · 最后更新：{updated}</div>
-            </div>""",
-        unsafe_allow_html=True
-    )
 
-def page_home():
-    st.subheader("首页")
-    st.write("本版本把能力拆成“工具（MCP 风格）”，再用“多步骤任务（Manus 风格）”串联。")
-    st.markdown("- ✅ 解决：JSON 下载 TypeError、Streamlit key 冲突、侧栏 logo 渲染")
-    st.markdown("- ✅ 增强：附表 7–10 支持跨页合并（附表1/附表4 多页可合并）")
-    st.markdown("- ✅ 新增：Word 模板自动打标（生成 docxtpl 模板并下载）")
 
-def page_tools(reg: ToolRegistry):
-    st.subheader("工具/MCP（本地）")
-    st.json(reg.list_tools())
 
-def page_base(reg: ToolRegistry, runner: TaskRunner):
-    st.subheader("培养方案基座（1–11 + 附表 7–10）")
-    left, right = st.columns([1, 1.4], gap="large")
-
-    with left:
-        pdf = st.file_uploader("上传培养方案 PDF", type=["pdf"], key="base_pdf_uploader")
-        if st.button("抽取并写入基座（Manus 流程）", type="primary", use_container_width=True, key="base_run_btn"):
-            if not pdf:
-                st.warning("请先上传 PDF。")
-            else:
-                pdf_bytes = pdf.getvalue()
-                steps = [TaskStep(
-                    tool="base.extract_from_pdf",
-                    args={"pdf_bytes": base64.b64encode(pdf_bytes).decode("ascii")},
-                    save_as="base_res"
-                )]
-                result = runner.run(steps)
-                if not result["ok"]:
-                    st.error(f"抽取失败：{result.get('error')}")
-                    st.json(result.get("logs", []))
-                else:
-                    payload = result["ctx"]["base_res"]["payload"]
-                    st.session_state.base_payload = payload
-                    st.session_state.project_updated_at = _now_str()
-                    st.success("已写入基座。右侧已联动填充。")
-
-        payload = st.session_state.base_payload
-        if payload:
-            json_payload = payload_to_jsonable(payload)
-            st.download_button(
-                "下载基座 JSON",
-                data=json.dumps(json_payload, ensure_ascii=False, indent=2).encode("utf-8"),
-                file_name=f"base_{st.session_state.project_id}.json",
-                mime="application/json",
-                use_container_width=True,
-                key="dl_base_json"
+def ai_ocr(image_bytes, provider, model_name):
+    """根据引擎进行图片文字识别"""
+    if provider == "Gemini":
+        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
+        try:
+            model = genai.GenerativeModel(model_name)
+            res = model.generate_content(["识别并输出图中文字内容。若是试卷，请提取题目和回答。", {"mime_type": "image/jpeg", "data": image_bytes}])
+            return res.text
+        except Exception as e: return f"Gemini 视觉识别失败: {str(e)}"
+    else:
+        if not ACTIVE_QWEN_KEY: return "错误：未配置密钥"
+        # 图片压缩优化
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        max_width = 1024
+        if img.width > max_width:
+            scale = max_width / img.width
+            img = img.resize((max_width, int(img.height * scale)))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        b64img = base64.b64encode(buf.getvalue()).decode("utf-8")
+        
+        client = OpenAI(api_key=ACTIVE_QWEN_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
+        try:
+            completion = client.chat.completions.create(
+                model="qwen-vl-ocr-latest",
+                messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64img}"}}, {"type": "text", "text": "请提取图中所有文字内容"}]}]
             )
-            with st.expander("调试：附表合并信息（merged）"):
-                st.json(payload.get("debug", {}).get("merged", {}))
-        else:
-            st.info("先抽取后可下载 JSON。")
+            return completion.choices[0].message.content
+        except Exception as e: return f"Qwen OCR 失败: {str(e)}"
 
-    with right:
-        payload = st.session_state.base_payload
-        if not payload:
-            st.info("请先在左侧上传 PDF 并点击“抽取并写入基座”。")
+# --- 5. 文档与工具函数 ---
+def extract_text_from_file(file):
+    """支持多格式文本提取"""
+    try:
+        if file.name.endswith(".docx"):
+            return "\n".join([p.text for p in Document(file).paragraphs])
+        elif file.name.endswith(".pdf"):
+            with pdfplumber.open(file) as pdf:
+                return "\n".join([page.extract_text() or "" for page in pdf.pages])
+        elif file.name.endswith(".doc"):
+            return mammoth.convert_to_text(file).value
+        return "格式暂不支持"
+    except Exception as e:
+        return f"解析失败: {str(e)}"
+
+
+def safe_extract_text(file, max_chars=15000):
+    if not file: return ""
+    try:
+        text_list = []
+        if file.name.endswith(".pdf"):
+            with fitz.open(stream=file.read(), filetype="pdf") as doc:
+                for page in doc:
+                    text_list.append(page.get_text())
+                    if sum(len(t) for t in text_list) > max_chars: break
+            return "".join(text_list)[:max_chars]
+            
+        elif file.name.endswith(".docx"):
+            doc = Document(file)
+            for p in doc.paragraphs:
+                if p.text.strip(): text_list.append(p.text)
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    processed_cells = []
+                    for cell in row.cells:
+                        content = cell.text
+                        # --- 核心改进：非互斥全量替换，涵盖更多 Word 特殊符号 ---
+                        # 识别“已选中”符号
+                        checked_chars = ['☑', 'þ', '\xfe', '\uf0fe', '☒', '√']
+                        # 识别“未选中”符号
+                        unchecked_chars = ['☐', '¨', '\xa8', '\uf0a1', '□']
+                        
+                        for c in checked_chars:
+                            content = content.replace(c, '[已选中]')
+                        for u in unchecked_chars:
+                            content = content.replace(u, '[未选中]')
+                        
+                        processed_cells.append(content.strip())
+                    
+                    row_text = [c for c in processed_cells if c]
+                    if row_text: text_list.append(" | ".join(row_text))
+            
+            return "\n".join(text_list)[:max_chars]
+        elif file.name.endswith(".doc"):
+            return mammoth.convert_to_text(file).value[:max_chars]            
+        return ""
+
+    except Exception as e:
+        st.error(f"文件 {file.name} 解析出错: {str(e)}")
+        return ""
+
+def render_pdf_images(pdf_file):
+    images = []
+    pdf_file.seek(0)
+    with fitz.open(stream=pdf_file.read(), filetype="pdf") as pdf:
+        for page in pdf:
+            pix = page.get_pixmap(matrix=fitz.Matrix(2,2))
+            images.append(pix.tobytes("png"))
+    return images
+
+def nav_bar(show_back=False):
+    st.markdown(f'<div style="background:#1E2129;padding:20px;border-radius:10px;margin-bottom:10px;"><h1 style="color:white;margin:0;font-size:24px;">🎓 智能教学与批卷系统 <span style="font-size:14px;color:#888;">{engine_id} 引擎在线</span></h1></div>', unsafe_allow_html=True)
+    if show_back:
+        if st.button("⬅️ 返回主页", use_container_width=True):
+            st.query_params["page"] = "首页"
+            st.rerun()
+
+# --- 6. 页面功能定义 ---
+def page_home():
+    nav_bar()
+    st.markdown("### 🛠️ 教务与批改功能矩阵")
+    cols = st.columns(3)
+    modules = [
+        ("📄", "教学大纲生成", "大纲"), ("📅", "教学日历生成", "日历"), ("📋", "培养方案生成", "方案"),
+        ("📝", "智能批卷系统", "批卷"), ("📈", "成绩分析报告", "分析"), ("📚", "使用教程与帮助", "教程")
+    ]
+    
+    # 在循环中处理跳转
+    for i, (icon, title, link) in enumerate(modules):
+        with cols[i % 3]:
+            st.markdown(f'<div style="border:1px solid #ddd;padding:20px;border-radius:10px;text-align:center;"><span style="font-size:40px;">{icon}</span><h4>{title}</h4></div>', unsafe_allow_html=True)
+            
+            if title == "使用教程与帮助":
+                st.link_button("🚀 点击进入官方教程站", "https://telyon.click", use_container_width=True)
+            else:
+                if st.button(f"进入{title}", key=f"nav_{i}", use_container_width=True):
+                    st.query_params["page"] = link
+                    st.rerun()              
+
+def page_syllabus():
+    nav_bar(show_back=True)
+    st.subheader("📄 深度智造：教学大纲 (支持上传教材分析)")
+    
+    # 5.1 上传辅助资料区域
+    with st.expander("##### 📚 第一步：上传参考资料 (教材/培养方案/参考文献)", expanded=True):
+        col_u1, col_u2 = st.columns(2)
+        book_file = col_u1.file_uploader("上传教材/参考书 PDF/Word", type=["pdf", "docx"])
+        plan_file = col_u2.file_uploader("上传人才培养方案 PDF/Word", type=["pdf", "docx"])
+        
+    # 5.2 手工填写基本信息
+    with st.form("syllabus_form"):
+        st.markdown("##### 📚 第二步：填写关键参数")        
+        # 第一排：基础课程信息 
+        c1, c2, c3 = st.columns(3)
+        name = c1.text_input("课程名称", value="数值模拟在材料成型中的应用")
+        major = c2.text_input("适用专业", value="材料成型及控制工程（焊接方向）")
+        course_type = c3.selectbox("课程性质", ["必修", "限选", "选修"], index=1)
+
+        # 第二排：学分学时与考核 
+        c4, c5, c6 = st.columns(3)
+        hours = c4.number_input("总学时", value=32)
+        credits = c5.number_input("总学分", value=2.0, step=0.5)
+        assessment = c6.selectbox("考核方式", ["考试", "考查"], index=1)
+
+        # 第三排：学期与要求 
+        c7, c8 = st.columns(2)
+        semester = c7.selectbox("开课学期", ["一", "二", "三", "四", "五", "六", "七", "八"], index=4)
+        prerequisites = c8.text_area("先修课程要求", value="高等数学、工程力学，具备基本微积分和工程力学知识", height=68)
+
+        # 核心目标与思政
+        obj = st.text_area("培养目标", placeholder="输入课程培养目标...", value="课程目标1：能够了解材料成型的数值模拟软件的原理和方法，并理解其局限性；\n课程目标2：能够选用合适的专业数值模拟软件分析材料成型工程中的复杂问题；\n课程目标3：能够选用适合的数值模拟软件预测材料成型工程问题，并分析其局限性。")
+        ideology = st.text_area("思政融入点", value="国产工业软件发展、两弹一星精神")
+
+        if st.form_submit_button("🚀 结合上传资料生成 OBE 标准大纲"):
+            with st.spinner("正在阅读文档并构思大纲..."):
+                #book_ctx = extract_text_from_file(book_file) if book_file else "未提供教材"
+                plan_ctx = extract_text_from_file(plan_file) if plan_file else "未提供培养方案"   
+                book_ctx = safe_extract_text(book_file) if book_file else "未提供教材"
+                #plan_ctx = safe_extract_text(plan_file) if plan_file else "未提供培养方案"
+                
+                prompt = f"""
+                        你是一位资深的高校工程教育认证专家。请为《{name}》课程撰写一份高质量教学大纲。文字专业且符合OBE理念。
+                        
+                        **严格排版要求：**
+                        1. 禁止使用任何 HTML 标签（如 <br/>, <b> 等）。
+                        2. 所有的表格必须使用标准 Markdown 格式：| 列1 | 列2 |。
+                        3. 必须包含分隔线：| :--- | :--- |。
+                        4. 每个表格上方和下方必须各留一行空行。
+                        
+                        **背景资料（请务必参考以下内容）：**
+                        1. 教材/内容核心：{book_ctx[:12000]} (注：由于长度限制，已截取前1万字符)
+                        2. 专业培养要求：{plan_ctx[:10000]}
+                        
+                        **手工填写的参数：**                    
+                        - 课程性质：{course_type} | 考核方式：{assessment} | 学分：{credits} | 学时：{hours}
+                        - 适用专业：{major} | 思政：{ideology} | 开课学期{semester} | 先修课程及其要求{prerequisites}                   
+                        - 课程目标支撑毕业要求表（含课程目标{obj}
+                        
+                        **大纲必须包含：**
+                        - 课程基本信息表，包含大纲名称、课程名称{name}、英文名称、编码、课程性质{course_type}、适用专业{major}、考核方式{assessment}、总学分{credits}、总 学 时{hours}（理论学时X、实验学时X、实训学时X、其他（讨论）	学时X）、开课学期{semester}、先修课程及其要求{prerequisites}等
+                        - 课程简介（理实结合，不少于200字）
+                        - 建议教材	 
+                        - 参考资料	 
+                        - 教学条件
+                        - 课程目标支撑毕业要求表（含课程目标{obj}、支撑指标点如4.1/5.1及支撑强度H/M/L）
+                        - 德育目标
+                        - 教学内容学时分配表（确保总学时为{hours}）（教学内容参考教材和参考材料{book_ctx}，包含序号、教学内容、学生学习预期成果、计划学时、支撑目标、教学方式、其它（作业、习题、实验等）
+                        - 课程目标考核
+                        - 课程目标达成情况评价
+                        - 考核评价表（包含平时成绩与期末考试占比）                    
+                        - 课程考核，包含标准考试评分标准、作业评分标准
+                        - 大作业评分标准，包含作业内容、评价标准（90-100分	70-89 分	60-69分	0-59分）、所占比重
+                        - 课程思政实施方案（结合：{ideology}），包含思政内容切入点、典型案例、教育载体及方法、预期达到的目标、	体现的价值观或思政元素
+                        
+                        **尤其注意构建《课程目标支撑毕业要求表》时：**
+                        请基于培养方案{plan_ctx}严格以下对应关系生成表格，禁止随意发挥：
+                        1. 课程目标1：{obj.split('课程目标2')[0] if '课程目标2' in obj else obj} 
+                           --> 必须支撑：5.1 (工具使用)。
+                        2. 课程目标2：... (以此类推，请解析用户输入的 {obj})
+
+                        **表格格式要求：**
+                        | 课程目标 | 支撑毕业要求及指标点 | 支撑强度 (H/M/L) |
+                        | :--- | :--- | :--- |
+                        | 课程目标1：[简述目标内容] | 5.1 了解常用现代仪器... | H |
+                        | 课程目标2：[简述目标内容] | 5.2 能够选择与使用恰当仪器... | M |
+
+                        **特别注意：**
+                        - 每一行只能对应一个课程目标。
+                        - 每一个课程目标只能对应一个毕业要求及指标点
+                        - 指标点描述必须完整。
+                        - 支撑强度必须根据该目标对指标点的支撑力度给出唯一的 H、M 或 L。                        
+                        """            
+                # 执行生成并存入缓存
+                st.session_state.gen_content["syllabus"] = ai_generate(prompt, engine_id, selected_model)
+                st.session_state['course_name'] = name
+                st.session_state['total_hours'] = hours
+                st.session_state['major'] = major # 适用专业
+                #st.session_state['assessment_method'] = assessment # 考核方式
+                st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
+                st.session_state['ideology_points'] = ideology # 存储思政点，以便日历中安排思政课次                
+
+                st.success("✅ 大纲生成成功！")
+
+    if st.session_state.gen_content["syllabus"]:
+        st.markdown("---")
+        st.container(border=True).markdown(st.session_state.gen_content["syllabus"])
+        col1, col2 = st.columns(2)
+        col1.download_button("💾 下载 Word 版大纲", create_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
+        col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
+
+
+
+# ==================== 1. 核心渲染与辅助函数 ====================
+# --- 辅助函数：读取模版结构 ---
+def read_local_docx_structure(file_path):
+    if not os.path.exists(file_path):
+        return "模版文件不存在"
+    try:
+        doc = Document(file_path)
+        return "\n".join([p.text for p in doc.paragraphs if "{{" in p.text])
+    except:
+        return "模版读取失败"
+
+# --- 核心函数：渲染 Word 文档 ---
+def render_calendar_docx(template_path, data_dict, sig_images=None):
+    """
+    data_dict: 包含所有标签键值的字典
+    sig_images: 字典，格式为 {"标签名": 文件流}
+    """
+    try:
+        doc = DocxTemplate(template_path)
+        
+        # 1. 递归清洗数据中的 None 或 N/A
+        def clean_val(v):
+            if v is None or str(v).lower() in ["none", "n/a", "未提供"]: return ""
+            return v
+
+        processed_data = {}
+        for k, v in data_dict.items():
+            if k == "schedule": # 进度表特殊处理
+                processed_data[k] = [{sk: clean_val(sv) for sk, sv in item.items()} for item in v]
+            else:
+                processed_data[k] = clean_val(v)
+
+        # 2. 注入签名图片
+        if sig_images:
+            for key, img_stream in sig_images.items():
+                if img_stream:
+                    # 将上传的图片转换为 Word 内部对象，宽度设为 30mm
+                    processed_data[key] = InlineImage(doc, img_stream, width=Mm(30))
+                else:
+                    processed_data[key] = ""
+
+        # 3. 渲染并导出
+        doc.render(processed_data, autoescape=True)
+        target_stream = io.BytesIO()
+        doc.save(target_stream)
+        return target_stream.getvalue()
+    except Exception as e:
+        st.error(f"渲染失败: {str(e)}")
+        return None
+
+
+# --- 教师端：编报页面 ---
+def render_teacher_view():
+    st.markdown("#### 📝 教师端：教学日历编报")
+    
+    # --- 1. 基础与课程信息 (全项) ---
+    with st.container(border=True):
+        st.markdown("##### 👤 1. 基本信息")
+     
+        c1, c2, c3 = st.columns([1.5, 2, 1.5])
+        school_name = c1.text_input("学校名称", key="school_name")
+        course_name = c2.text_input("课程名称", value=st.session_state.get('course_name', ""))
+        class_info = c3.text_input("适用专业及年级", value=st.session_state.get('major', ""))
+        
+        t1, t2, t3, t4 = st.columns(4)
+        teacher_name = t1.text_input("主讲教师", value=st.session_state.get('teacher_name', ""))
+        #teacher_title = t2.text_input("职称", value=st.session_state.get('teacher_title', ""))
+        teacher_title = t2.selectbox("职称", ["教授", "副教授", "讲师", "助教", "研究员", "副研究员", "助理研究员", "助理研究员", "高级实验师", "实验师", "助理实验师"])
+        #academic_year = t3.text_input("学年 (如 2025-2026)", value="2025-2026")
+        
+        # 1. 使用 number_input 获取起始年份，设置 step=1 激活加减号
+        start_year = t3.number_input("学年 (起始)", value=2025, step=1, help="点击 +/- 切换学年")
+
+        # 2. 动态计算完整的学年字符串
+        academic_year = f"{start_year}-{start_year + 1}"
+
+        # 3. 在下方显示一个提示，让老师确认完整的学年范围
+        t3.caption(f"当前选择：:blue[{academic_year}]")
+        
+        semester = t4.selectbox("学期", ["1", "2"])
+
+    # --- 2. 学时与教材配置 (全项) ---
+    with st.container(border=True):
+        st.markdown("##### 📚 2. 学时分配与教材")
+        h1, h2, h3, h4 = st.columns(4)
+        total_hours = h1.number_input("总学时数", value=int(st.session_state.get('total_hours', 24)))
+        term_hours = h2.number_input("本学期总学时", value=total_hours)
+        total_weeks = h3.number_input("上课周数", value=12)
+        weekly_hours = h4.number_input("平均每周学时", value=total_hours//total_weeks if total_weeks > 0 else 2)
+
+        d1, d2, d3, d4, d5 = st.columns(5)
+        lec_h = d1.number_input("讲课学时", value=total_hours)
+        lab_h = d2.number_input("实验学时", value=0)
+        qui_h = d3.number_input("测验学时", value=0)
+        ext_h = d4.number_input("课外学时", value=0)
+        course_nature = d5.text_input("课程性质", value="专业必修")
+
+        st.markdown("---")
+        m1, m2, m3, m4 = st.columns([2, 1, 1, 1])
+        book_name = m1.text_input("教材名称", value=st.session_state.get("textbook_name", ""))
+        publisher = m2.text_input("出版社", value=st.session_state.get("publisher", ""))
+        pub_date = m3.text_input("出版时间", value=st.session_state.get('publish_date', ""))
+        book_remark = m4.text_input("获奖情况", value=st.session_state.get('textbook_remark', ""))
+        ref_books = st.text_area("参考书目", value=st.session_state.get("references_text", ""))
+        
+        k1, k2 = st.columns(2)
+        current_val = st.session_state.get('assessment_method', '考查')
+        assess_method = k1.radio("考核方式", ["考试", "考查"], horizontal=True, 
+                                 index=0 if "考试" in current_val else 1)
+        grading_formula = k2.text_input("成绩计算方法", value="总成绩=平时成绩 30%+考试成绩 70%")                         
+
+
+    # --- 3. 备注与签名 ---
+    with st.container(border=True):
+        st.markdown("##### 📝 3. 其他信息")
+        n1, n2, n3 = st.columns(3)
+        note_1 = n1.text_input("备注1", value="在授课过程中，可能根据学生接受情况，微调课程进度")
+        note_2 = n2.text_input("备注2", value="遇到偶发情况需要调课，需履行调停课手续")
+        note_3 = n3.text_input("备注3", value="")
+        
+        teacher_sig_file = st.file_uploader("✍️ 上传/更换手写签名", type=['png', 'jpg'], key="t_sig_up")
+
+    # --- 4. 进度表编辑 (含学时拆分) ---
+    st.divider()
+    st.markdown("##### 🗓️ 4. 进度安排 (学时 > 2 自动拆分)")
+    syllabus_file = st.file_uploader("通过大纲抽取内容 (可选)", type=['docx', 'pdf'])
+    
+    # 在点击按钮后的逻辑中
+    if st.button("🪄 依据大纲抽取并自动拆分学时"):
+    
+        syl_content = ""
+        if syllabus_file:
+            syl_content = safe_extract_text(syllabus_file)
+        else:
+            # 尝试从上一页生成的大纲中获取，若无则为空字符串
+            syl_content = st.session_state.gen_content.get("syllabus") or ""
+        
+        if not syl_content.strip():
+            st.warning("⚠️ 未检测到大纲内容。请先上传大纲文件，或在“教学大纲生成”页面先生成大纲。")
             return
 
-        sections = payload.get("sections", {}) or {}
-        tables = payload.get("tables", {}) or {}
+        with st.spinner("正在深度解析大纲并同步填报信息..."):
+            syl_ctx = safe_extract_text(syllabus_file) if syllabus_file else st.session_state.gen_content.get("syllabus", "")
+            
+            # 定义完整提取提示词
+            split_prompt = f"""
+            # 角色
+            你是一位精通 OBE 理念的高校教务专家。
+            
+            # 任务
+            解析提供的【教学大纲】，提取所有填报项，并生成严格对齐课次的教学日历 JSON。
+            
+            # 核心约束（最高优先级）
+            1. **数学平衡**：总学时为 {total_hours}，总周数为 {total_weeks}。经计算，每周必须精确安排 【{weekly_hours}】 学时。
+            2. **周学时定额**：在 schedule 列表中，同一周(week)内所有项的 hrs 之和必须【绝对等于】{weekly_hours}。
+            3. **拆分逻辑**：若大纲某模块学时 > {weekly_hours}，必须拆分为连续的两周（或更多）。例如：模块X(4学时) -> 第N周(2学时) + 第N+1周(2学时)。
+            4. **合并逻辑**：若某模块学时为 1，必须与大纲下一个模块合并在同一周(week)内，确保该周总学时为 {weekly_hours}。
+            
+            # 提取字段要求
+            请从大纲中提取并输出以下 JSON 结构：
+            {{
+                "base_info": {{
+                    "course_name": "从大纲标题或第一表提取课程名称",
+                    "textbook_name": "教材名称",
+                    "publisher": "出版社",
+                    "publish_date": "出版时间",
+                    "textbook_remark": "获奖情况",
+                    "references": "参考书目字符串",
+                    "assessment_method": "考试或考查",
+                    "grading_formula": "成绩计算方法",
+                    "lecture_hours": 讲课学时(数字),
+                    "lab_hours": 实验学时(数字),
+                    "quiz_hours": 测验学时(数字),
+                    "extra_hours": 课外学时(数字),
+                    "major": 适用专业
+                }},
 
-        toc = [("1","培养目标"),("2","毕业要求"),("3","专业定位与特色"),("4","主干学科/核心课程/实践环节"),
-               ("5","标准学制与授予学位"),("6","毕业条件"),
-               ("7","专业教学计划表（附表1）"),("8","学分统计表（附表2）"),
-               ("9","教学进程表（附表3）"),("10","支撑关系表（附表4）"),("11","逻辑思维导图（附表5）")]
+                "schedule": [
+                    {{ "week": 1, "sess": 1, "content": "章节内容", "req": "重点要求", "hrs": 数字, "method": "方法", "other": "作业", "obj": "目标", "source_text": "大纲原文片段" }}
+                ]
+            }}
+            
+            # 参考资料
+            教学大纲内容：{syl_ctx[:10000]}
+            """
+            
+            res = ai_generate(split_prompt, engine_id, selected_model)
+            try:
+                # # 1. 解析 JSON
+                # match = re.search(r'\{.*\}', res, re.DOTALL)
+                # full_data = json.loads(match.group(0))
+                
+                # # 2. 自动刷新 UI 字段（将提取的信息存入 session_state）
+                # bi = full_data.get("base_info", {})
+                
+                # --- 核心修复：解决 Extra Data 报错 ---
+                # 贪婪匹配最后一个花括号，确保只截取最完整的 JSON 块
+                match = re.search(r'(\{.*\})', res, re.DOTALL)
+                if not match:
+                    st.error("AI 未返回有效的 JSON 格式")
+                    return
+                
+                json_str = match.group(1).strip()
+                full_data = json.loads(json_str)
+                bi = full_data.get("base_info", {})  
+                st.session_state["textbook_name"] = bi.get("textbook_name", "")
+                st.session_state["publisher"] = bi.get("publisher", "")
+                st.session_state["publish_date"] = bi.get("publish_date", "")
+                st.session_state["textbook_remark"] = bi.get("textbook_remark", "")
+                st.session_state["references_text"] = bi.get("references", "")
+                st.session_state["assessment_method"] = bi.get("assessment_method", "考查")
+                st.session_state["grading_formula"] = bi.get("grading_formula", "")
+                st.session_state["major"] = bi.get("major", "")
+                st.session_state["lecture_hours"] = bi.get("lecture_hours", "")
+                st.session_state["lab_hours"] = bi.get("lab_hours", "")
+                st.session_state["quiz_hours"] = bi.get("quiz_hours", "")
+                st.session_state["extra_hours"] = bi.get("extra_hours", "")
+                
+                # 3. 进度表数据处理
+                raw_schedule = full_data.get("schedule", [])
+                st.session_state.calendar_data = pd.DataFrame(raw_schedule).fillna("").astype(str).to_dict('records')
+                
+                st.success("✅ 大纲信息已同步刷新至上方表单！")
+                st.rerun() # 强制刷新页面以显示新数据
+            except Exception as e:
+                st.error(f"解析并同步失败: {str(e)}")
 
-        sec_pick = st.radio("栏目", options=[x[0] for x in toc], format_func=lambda x: dict(toc)[x],
-                            horizontal=True, key="base_sec_radio")
-        st.markdown(f"##### {sec_pick}、{dict(toc)[sec_pick]}")
-
-        st.text_area("文本抽取结果", value=sections.get(sec_pick, ""), height=220, key=f"sec_text_{sec_pick}")
-
-        if sec_pick in ["7","8","9","10"]:
-            st.markdown("###### 表格区（跨页已自动合并，可编辑）")
-            df0 = tables.get(sec_pick)
-            if df0 is None or (isinstance(df0, pd.DataFrame) and df0.empty):
-                st.info("未自动抽取到该附表（可能表格是图片或线条不规则）。")
-                df0 = pd.DataFrame()
-            editor_key = f"tbl_editor_{sec_pick}"
-            edited_df = st.data_editor(df0, num_rows="dynamic", use_container_width=True, key=editor_key)
-            st.session_state.base_tables_edited[sec_pick] = edited_df
-
-def page_template_tagger(reg: ToolRegistry, runner: TaskRunner):
-    st.subheader("模板打标：Word → docxtpl 模板（先只生成模板，不填充）")
-    docx = st.file_uploader("上传范本（.docx）", type=["docx"], key="tagger_uploader")
-    if st.button("一键打标并生成模板（Manus 流程）", type="primary", use_container_width=True, key="tagger_btn"):
-        if not docx:
-            st.warning("请先上传 docx。")
+    if st.session_state.calendar_data:
+        # 隐藏 source_text 以保持页面整洁，但保留在数据中
+        st.session_state.calendar_data = st.data_editor(
+            pd.DataFrame(st.session_state.calendar_data).astype(str),
+            column_config={
+                "source_text": None, # 隐藏原文依据列，不显示但保留数据
+                "content": st.column_config.TextColumn("教学内容", width="large"),
+                "hrs": st.column_config.NumberColumn("学时", min_value=1, max_value=4)
+            },
+            num_rows="dynamic", use_container_width=True
+        ).to_dict('records')
+        
+        
+    # --- 5. 提交审批 (统一变量名为 calendar_final_data) ---
+    if st.button("📤 提交教学日历审批", type="primary", use_container_width=True):
+        if not st.session_state.calendar_data:
+            st.error("进度表内容为空，无法提交。")
         else:
-            docx_bytes = docx.getvalue()
-            steps = [TaskStep(
-                tool="template.tag_docx",
-                args={"docx_bytes": base64.b64encode(docx_bytes).decode("ascii")},
-                save_as="tag_res"
-            )]
-            result = runner.run(steps)
-            if not result["ok"]:
-                st.error(f"打标失败：{result.get('error')}")
-            else:
-                tag_res = result["ctx"]["tag_res"]
-                tpl_bytes = base64.b64decode(tag_res["template_bytes"])
-                st.session_state.tagger_last_template_bytes = tpl_bytes
-                st.session_state.tagger_last_meta = tag_res.get("meta", {})
-                st.success("已生成模板，可下载测试是否可用。")
+            ref_list = [line.strip() for line in ref_books.split('\n') if line.strip()]
+            # 封装为 template_general.docx 需要的所有键 
+            st.session_state.calendar_final_data = {
+                "school_name": school_name, "academic_year": academic_year, "semester": semester,
+                "course_name": course_name, "class_info": class_info, "teacher_name": teacher_name,
+                "teacher_title": teacher_title, "total_hours": total_hours, "term_hours": term_hours,
+                "total_weeks": total_weeks, "weekly_hours": weekly_hours, "course_nature": course_nature,
+                "lecture_hours": lec_h, "lab_hours": lab_h, "quiz_hours": qui_h, "extra_hours": ext_h,
+                "textbook_name": book_name, "publisher": publisher, "publish_date": pub_date,
+                "textbook_remark": book_remark, 
+                #"references": [ref_books], 
+                "assessment_method": assess_method,
+                "grading_formula": grading_formula, "schedule": st.session_state.calendar_data,
+                "note_1": note_1, "note_2": note_2, "note_3": note_3,
+                "sign_date_1": datetime.now().strftime("%Y年 %m月 %d日"),
+                "references": ref_list, # 传入拆分后的列表，确保模板可以循环渲染
+            }
+            st.session_state.teacher_sign_img_file = teacher_sig_file
+            st.session_state.calendar_status = "Pending_Head"
+            st.success("✅ 已提交至系主任审批！")
+            st.rerun()
 
-    if st.session_state.tagger_last_template_bytes:
-        st.download_button(
-            "下载打标后的模板（.docx）",
-            data=st.session_state.tagger_last_template_bytes,
-            file_name="tagged_template.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-            key="dl_tagged_tpl"
-        )
-        with st.expander("查看自动识别到的标签"):
-            st.json((st.session_state.tagger_last_meta or {}).get("tags_used", {}))
-        st.info((st.session_state.tagger_last_meta or {}).get("note", ""))
+def render_approval_view(role):
+    st.markdown(f"#### 🛡️ {'系主任' if role == 'Head' else '主管院长'}审批界面")
+    
+    # 核心安全检查：如果数据包不存在，显示提示而非报错
+    data = st.session_state.get("calendar_final_data")
+    if not data:
+        st.info("🍵 目前没有待处理的教学日历申请。")
+        return
 
-def main():
-    st.set_page_config(page_title="Teaching Agent Suite (MCP+Manus style)", page_icon="🧠", layout="wide")
-    _init_state()
-
-    reg = build_registry()
-    runner = TaskRunner(reg)
-
-    ui_sidebar_brand()
-    ui_sidebar_nav()
-    render_top_header()
-
-    page = st.session_state.active_page
-    if page == "首页":
-        page_home()
-    elif page == "基座":
-        page_base(reg, runner)
-    elif page == "模板打标":
-        page_template_tagger(reg, runner)
+    target_status = "Pending_Head" if role == "Head" else "Pending_Dean"
+    if st.session_state.calendar_status == target_status:
+        st.info(f"待处理：{data['course_name']} (教师：{data['teacher_name']})")
+        st.table(pd.DataFrame(data['schedule']).drop(columns=['source_text'], errors='ignore'))
+        
+        with st.form(f"form_{role}"):
+            opinion = st.text_area("审批意见", value="同意。")
+            sig_file = st.file_uploader("签署手写签名", type=['png', 'jpg'])
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ 批准"):
+                st.session_state[f"{role.lower()}_opinion"] = opinion
+                st.session_state[f"{role.lower()}_sig_img"] = sig_file
+                st.session_state[f"{role.lower()}_date"] = datetime.now().strftime("%Y年 %m月 %d日")
+                st.session_state.calendar_status = "Pending_Dean" if role == "Head" else "Approved"
+                st.rerun()
+            if c2.form_submit_button("❌ 退回"):
+                st.session_state.calendar_status = "Draft"
+                st.rerun()
     else:
-        page_tools(reg)
+        st.write("🍵 暂无待办事项。")
 
-if __name__ == "__main__":
-    main()
+def page_calendar():
+    nav_bar(show_back=True)
+    st.subheader("📅 教学日历编报与多级审批")
+    
+    user_role = st.sidebar.selectbox("切换角色视图", ["授课教师", "系主任", "主管院长"])
+
+def page_calendar():
+    nav_bar(show_back=True)
+    
+    # 1. 创建两列，比例建议为 3:1 或 4:1，让标题占据更多空间
+    col1, col2 = st.columns([4, 1])
+    
+    with col1:
+        # 放置主标题
+        st.subheader("📅 教学日历编报与多级审批")
+    
+    with col2:
+        # 2. 放置选择框，并使用 label_visibility="collapsed" 隐藏标签，使其与标题对齐
+        user_role = st.selectbox(
+            "角色视图", 
+            ["授课教师", "系主任", "主管院长"],
+            label_visibility="collapsed",  # 隐藏标签，节省垂直空间
+            index=0,
+            key="role_selector" # 建议加上 key 保证状态稳定
+        )
+    
+    st.divider() # 增加一条分割线，让头部布局更清晰
+    
+    # 后续业务逻辑可以使用 user_role 变量
+    #st.info(f"当前正在以 【{user_role}】 视角查看系统")
+
+    if user_role == "授课教师": render_teacher_view()
+    elif user_role == "系主任": render_approval_view("Head")
+    else: render_approval_view("Dean")
+
+# --- 7. 审批过程实时显示 (新增模块) ---
+    st.divider()
+    st.markdown("##### 🚥 教学日历审批进度监控")
+    
+    # 定义状态映射与进度百分比
+    status_map = {
+        "Draft": {"val": 10, "label": "草拟中", "color": "gray"},
+        "Pending_Head": {"val": 40, "label": "待教研室主任审批", "color": "blue"},
+        "Pending_Dean": {"val": 70, "label": "待学院主管领导审批", "color": "orange"},
+        "Approved": {"val": 100, "label": "审批已通过", "color": "green"}
+    }
+    
+    curr_status = st.session_state.get("calendar_status", "Draft")
+    progress_info = status_map.get(curr_status, status_map["Draft"])
+    
+    # 渲染进度条
+    st.progress(progress_info["val"])
+    
+    # 渲染可视化节点
+    n1, n2, n3, n4 = st.columns(4)
+    nodes = [("Draft", "草拟"), ("Pending_Head", "系主任审核"), ("Pending_Dean", "主管院长审批"), ("Approved", "完成归档")]
+    for i, (status_key, label) in enumerate(nodes):
+        col = [n1, n2, n3, n4][i]
+        if status_map[curr_status]["val"] >= status_map[status_key]["val"]:
+            col.success(f"● {label}")
+        else:
+            col.write(f"○ {label}")
+
+    # 审批结果与详细意见查看区域
+    with st.expander("📋 查看审批意见与结果详情", expanded=(curr_status != "Draft")):
+        if curr_status == "Draft":
+            st.info("💡 当前处于草拟阶段，尚未提交审批。")
+        else:
+            # 1. 教研室主任审批信息
+            st.markdown("**【教研室主任审批】**")
+            head_op = st.session_state.get("head_opinion", "等待处理...")
+            st.write(f"> 审批意见：{head_op}")
+            if "head_date" in st.session_state:
+                st.caption(f"审批时间：{st.session_state.head_date}")
+            if st.session_state.get("head_sign_img"):
+                st.image(st.session_state.head_sign_img, width=120, caption="系主任签名")
+            
+            st.divider()
+            
+            # 2. 学院领导审批信息
+            st.markdown("**【学院主管领导审批】**")
+            dean_op = st.session_state.get("dean_opinion", "等待处理...")
+            st.write(f"> 审批意见：{dean_op}")
+            if "dean_date" in st.session_state:
+                st.caption(f"审批时间：{st.session_state.dean_date}")
+            if st.session_state.get("dean_sign_img"):
+                st.image(st.session_state.dean_sign_img, width=120, caption="院长签名")
+
+    # --- 下载区域 ---
+    if curr_status == "Approved":
+        st.balloons()
+        final_data = st.session_state.calendar_final_data
+        # 补全审批意见 
+        final_data.update({
+            "head_opinion": st.session_state.get("head_opinion", ""),
+            "sign_date_2": st.session_state.get("head_date", ""),
+            "dean_opinion": st.session_state.get("dean_opinion", ""),
+            "sign_date_3": st.session_state.get("dean_date", "")
+        })
+        sig_map = {
+            "teacher_sign_img": st.session_state.get("teacher_sign_img_file"),
+            "head_sign_img": st.session_state.get("head_sig_img"),
+            "dean_sign_img": st.session_state.get("dean_sig_img")
+        }
+
+
+        # 核心修复：直接从已提交的数据包里读学校名
+        submitted_school = final_data.get("school_name", "").strip()
+        
+        # 使用 if-elif-else 结构更清晰
+        if submitted_school == "辽宁石油化工大学":
+            target_tpl = "template_lnpu.docx"
+        else:
+            target_tpl = "template_general.docx"
+
+        # 执行填充
+        doc_bytes = render_calendar_docx(target_tpl, final_data, sig_map)
+
+        if doc_bytes:
+            st.download_button("📥 下载完整审批版 (.docx)", data=doc_bytes, file_name="教学日历_已审批.docx")
+  
+
+def page_program():
+    nav_bar(show_back=True)
+    st.subheader("📋 专业人才培养方案生成")
+    with st.form("program_form"):
+        major = st.text_input("专业名称", value="材料成型及控制工程")
+        pos = st.text_area("专业特色", value="服务石油化工行业，聚焦焊接成型与无损检测")
+        if st.form_submit_button("生成人才培养方案"):
+            prompt = f"撰写{major}专业2024级培养方案。含培养目标、12项毕业要求、特色定位({pos})、核心课程。专业严谨。"
+            with st.spinner("正在构建方案..."):
+                st.session_state.gen_content["program"] = ai_generate(prompt, engine_id, selected_model)
+
+    if st.session_state.gen_content["program"]:
+        st.markdown("---")
+        st.container(border=True).markdown(st.session_state.gen_content["program"])
+        st.download_button(
+            "💾 下载 Word 版培养方案", 
+            create_docx(st.session_state.gen_content["program"]), 
+            file_name="培养方案.docx"
+        )
+def page_grading():
+    nav_bar(show_back=True)
+    st.subheader("📝 智能试卷批阅与评价")
+    c1, c2 = st.columns(2)
+    with c1:
+        q_file = st.file_uploader("1. 上传试题 (PDF/Word)", type=["pdf", "docx"], key="q")
+        q_txt = extract_text_from_file(q_file) if q_file else ""
+    with c2:
+        s_file = st.file_uploader("2. 上传标准答案 (PDF/Word)", type=["pdf", "docx"], key="s")
+        s_txt = extract_text_from_file(s_file) if s_file else ""
+
+    st.divider()
+    papers = st.file_uploader("3. 批量上传学生卷纸 (图片/PDF)", type=["jpg", "png", "pdf"], accept_multiple_files=True)
+
+    for idx, paper in enumerate(papers or []):
+        with st.container(border=True):
+            st.write(f"**学生 {idx+1}:** {paper.name}")
+            s_name = st.text_input("姓名", value=f"学生_{idx+1}", key=f"sn_{idx}")
+            
+            ocr_text = ""
+            if paper.type == "application/pdf":
+                imgs = render_pdf_images(paper)
+                for i, img in enumerate(imgs):
+                    st.image(img, width=350)
+                    with st.expander("🔍 查看高清大图"): st.image(img, use_container_width=True)
+                    with st.spinner("识别中..."): ocr_text += ai_ocr(img, engine_id, selected_model) + "\n"
+            else:
+                img_data = paper.read()
+                st.image(img_data, width=350)
+                with st.expander("🔍 查看高清大图"): st.image(img_data, use_container_width=True)
+                with st.spinner("识别中..."): ocr_text = ai_ocr(img_data, engine_id, selected_model)
+            
+            final_ans = st.text_area("识别结果校对", value=ocr_text, key=f"ocr_{idx}", height=150)
+            
+            if st.button(f"🚀 {engine_id} 自动批改", key=f"go_{idx}"):
+                with st.spinner("正在评分..."):
+                    p = f"题目：{q_txt}\n答案：{s_txt}\n学生：{final_ans}\n请评分(满分100)并给出批注。格式：\n分数：[数字]\n批注：[解析]"
+                    res = ai_generate(p, engine_id, selected_model)
+                    st.markdown(res)
+                    score = int(re.search(r"分数[：:]\s*(\d+)", res).group(1)) if re.search(r"分数[：:]\s*(\d+)", res) else 0
+                    st.session_state.score_records.append({"学生": s_name, "分数": score, "评价": res})
+
+def page_analysis():
+    nav_bar(show_back=True)
+    st.subheader("📈 成绩与分析报告")
+    if not st.session_state.score_records:
+        st.warning("当前无批改记录")
+        return
+    st.dataframe(st.session_state.score_records, use_container_width=True)
+    scores = [r["分数"] for r in st.session_state.score_records]
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("平均分", f"{np.mean(scores):.1f}")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.hist(scores, bins=range(0, 110, 10), color='#4F8BF9', edgecolor='white')
+        st.pyplot(fig)
+    with col2:
+        st.download_button("导出成绩记录 (CSV)", str(st.session_state.score_records), "scores.csv")
+
+# --- 7. 路由逻辑 ---
+route = {
+    "首页": page_home, "大纲": page_syllabus, "日历": page_calendar, 
+    "方案": page_program, "批卷": page_grading, "分析": page_analysis
+}
+current = st.query_params.get("page", "首页")
+route.get(current, page_home)()
