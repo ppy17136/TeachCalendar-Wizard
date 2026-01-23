@@ -84,35 +84,53 @@ class SyllabusSkills:
         
         extracted_data = []
         
+    def extract_graduation_matrix(self, file_path):
+        """
+        Specialized skill to extract 'Course vs Graduation Requirement' matrix from PDF.
+        """
+        import pdfplumber
+        import os
+        
+        extracted_data = []
+        debug_log = []
+        
         try:
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
-                    # 1. Search for keywords in page text first
-                    text = page.extract_text()
-                    if "毕业要求" not in text or "支撑" not in text:
-                        continue
-                        
-                    # 2. Extract tables
-                    tables = page.extract_tables()
-                    for table in tables:
-                        # Heuristic: Check headers for "毕业要求" or "指标点"
-                        # We flatten the table to string to check first
-                        table_str = str(table)
-                        if "毕业要求" in table_str:
-                            # This is likely the target table.
-                            # Naive parsing: assume row contains [Req, Point, Course1, Course2...]
-                            # In reality, we just dump the raw table rows for the LLM to process
-                            # because the layout varies wildly between schools.
-                            extracted_data.extend(table)
-                            
+                for i, page in enumerate(pdf.pages):
+                    # 1. Text Check (Relaxed)
+                    text = page.extract_text() or ""
+                    # If text implies graduation requirements, prioritize this page
+                    score = 0
+                    if "毕业要求" in text: score += 2
+                    if "支撑" in text: score += 2
+                    if "指标点" in text: score += 1
+                    
+                    # If page seems relevant (score > 0) OR if text is empty (scanned?), try table extract
+                    if score > 0 or len(text) < 50:
+                        tables = page.extract_tables()
+                        for table in tables:
+                            # Flatten table content to check relevance
+                            table_str = str(table)
+                            # Relaxed Match: Check for 'Requirement' or 'Index' or 'Support'
+                            if "要求" in table_str or "指标" in table_str or "H" in table_str:
+                                extracted_data.extend(table)
+                                debug_log.append(f"Page {i+1}: Found potential matrix table.")
+                            else:
+                                debug_log.append(f"Page {i+1}: Ignored irrelevant table.")
+                    else:
+                         debug_log.append(f"Page {i+1}: No keywords found.")
+
             if not extracted_data:
-                return "未在PDF中识别到明显的'毕业要求支撑矩阵'表格。"
+                return f"未找到支撑矩阵。调试日志: {'; '.join(debug_log[:5])}..."
                 
-            # Convert list of lists to string representation for LLM
-            return json.dumps(extracted_data, ensure_ascii=False)
+            # Truncate if too huge
+            json_dump = json.dumps(extracted_data, ensure_ascii=False)
+            if len(json_dump) > 15000:
+                return json_dump[:15000] + "...(truncated)"
+            return json_dump
             
         except Exception as e:
-            return f"矩阵提取失败: {str(e)}"
+            return f"矩阵提取异常: {str(e)}"
     
     def generate_section(self, section_name, context_info):
         """
