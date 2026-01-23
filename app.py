@@ -20,6 +20,11 @@ from datetime import datetime
 from docxtpl import InlineImage
 from docx.shared import Mm, Pt
 import pandas as pd  # 必须添加，用于数据类型清洗
+# --- New Imports for Agent Architecture ---
+from file_utils import extract_text_from_file, safe_extract_text
+from llm_wrapper import ai_generate, ai_ocr
+from agent_core import AgentCore
+
 
 # --- 1. 基础环境与配置 ---
 plt.rcParams['font.family'] = ['SimHei', 'sans-serif']
@@ -151,161 +156,10 @@ with st.sidebar:
     st.code("839146331@qq.com", language=None) # 使用 st.code 方便用户一键点击复制
 
 
-# --- 4. 核心功能函数 --- 
-def create_docx(text):
-    if text is None:
-        text = "内容为空"  # 或者直接返回 None    
-    doc = Document()
-    
-    # 1. 首先通过正则表达式清除所有 HTML 标签 (如 <br/>)
-    # 2. 接着通过链式 replace 清除 Markdown 的标题号和加粗符号
-    clean_text = re.sub('<[^<]+?>', '', text) \
-                   .replace("### ", "") \
-                   .replace("## ", "") \
-                   .replace("# ", "") \
-                   .replace("**", "")
-    
-    # 写入 Word
-    for line in clean_text.split('\n'):
-        if line.strip(): # 过滤掉多余的空行
-            p = doc.add_paragraph(line)
-            p.style.font.size = Pt(12)
-    
-    bio = io.BytesIO()
-    doc.save(bio)
-    return bio.getvalue()
-
-
-
-def ai_generate(prompt, provider, model_name):
-    """统一文本生成接口，支持多模型路由 """
-    # 1. 官方 SDK 处理 (Gemini) 
-    if provider == "Gemini":
-        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e: return f"Gemini 失败: {str(e)}"
-
-    # 2. OpenAI 兼容协议处理 (Qwen, Baidu, Kimi) 
-    config = {
-        "Qwen": {"key": ACTIVE_QWEN_KEY, "url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-        "QwenM": {"key": ACTIVE_QWENM_KEY, "url": "https://api-inference.modelscope.cn/v1"},
-        "Baidu": {"key": ACTIVE_BAIDU_KEY, "url": "https://qianfan.baidubce.com/v2"},
-        "Kimi": {"key": ACTIVE_KIMI_KEY, "url": "https://api.moonshot.cn/v1"},
-        "GLM": {"key": ACTIVE_GLM_KEY, "url": "https://open.bigmodel.cn/api/paas/v4"}
-    }
-    
-    target = config.get(provider)
-    if not target or not target["key"]:
-        return f"错误：未配置 {provider} 密钥"
-    
-    try:
-        # 利用 OpenAI 库的兼容性一键切换 
-        client = OpenAI(api_key=target["key"], base_url=target["url"])
-        completion = client.chat.completions.create(
-            model=model_name, 
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"{provider} 生成失败: {str(e)}"
-
-
-
-
-def ai_ocr(image_bytes, provider, model_name):
-    """根据引擎进行图片文字识别"""
-    if provider == "Gemini":
-        if not ACTIVE_GEMINI_KEY: return "错误：未配置密钥"
-        try:
-            model = genai.GenerativeModel(model_name)
-            res = model.generate_content(["识别并输出图中文字内容。若是试卷，请提取题目和回答。", {"mime_type": "image/jpeg", "data": image_bytes}])
-            return res.text
-        except Exception as e: return f"Gemini 视觉识别失败: {str(e)}"
-    else:
-        if not ACTIVE_QWEN_KEY: return "错误：未配置密钥"
-        # 图片压缩优化
-        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-        max_width = 1024
-        if img.width > max_width:
-            scale = max_width / img.width
-            img = img.resize((max_width, int(img.height * scale)))
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
-        b64img = base64.b64encode(buf.getvalue()).decode("utf-8")
-        
-        client = OpenAI(api_key=ACTIVE_QWEN_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
-        try:
-            completion = client.chat.completions.create(
-                model="qwen-vl-ocr-latest",
-                messages=[{"role": "user", "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64img}"}}, {"type": "text", "text": "请提取图中所有文字内容"}]}]
-            )
-            return completion.choices[0].message.content
-        except Exception as e: return f"Qwen OCR 失败: {str(e)}"
-
 # --- 5. 文档与工具函数 ---
-def extract_text_from_file(file):
-    """支持多格式文本提取"""
-    try:
-        if file.name.endswith(".docx"):
-            return "\n".join([p.text for p in Document(file).paragraphs])
-        elif file.name.endswith(".pdf"):
-            with pdfplumber.open(file) as pdf:
-                return "\n".join([page.extract_text() or "" for page in pdf.pages])
-        elif file.name.endswith(".doc"):
-            return mammoth.convert_to_text(file).value
-        return "格式暂不支持"
-    except Exception as e:
-        return f"解析失败: {str(e)}"
+# (Functions extract_text_from_file, safe_extract_text, ai_generate, ai_ocr have been moved to modules)
+# Still keeping render_pdf_images here as it uses fitz directly for UI rendering
 
-
-def safe_extract_text(file, max_chars=15000):
-    if not file: return ""
-    try:
-        text_list = []
-        if file.name.endswith(".pdf"):
-            with fitz.open(stream=file.read(), filetype="pdf") as doc:
-                for page in doc:
-                    text_list.append(page.get_text())
-                    if sum(len(t) for t in text_list) > max_chars: break
-            return "".join(text_list)[:max_chars]
-            
-        elif file.name.endswith(".docx"):
-            doc = Document(file)
-            for p in doc.paragraphs:
-                if p.text.strip(): text_list.append(p.text)
-            
-            for table in doc.tables:
-                for row in table.rows:
-                    processed_cells = []
-                    for cell in row.cells:
-                        content = cell.text
-                        # --- 核心改进：非互斥全量替换，涵盖更多 Word 特殊符号 ---
-                        # 识别“已选中”符号
-                        checked_chars = ['☑', 'þ', '\xfe', '\uf0fe', '☒', '√']
-                        # 识别“未选中”符号
-                        unchecked_chars = ['☐', '¨', '\xa8', '\uf0a1', '□']
-                        
-                        for c in checked_chars:
-                            content = content.replace(c, '[已选中]')
-                        for u in unchecked_chars:
-                            content = content.replace(u, '[未选中]')
-                        
-                        processed_cells.append(content.strip())
-                    
-                    row_text = [c for c in processed_cells if c]
-                    if row_text: text_list.append(" | ".join(row_text))
-            
-            return "\n".join(text_list)[:max_chars]
-        elif file.name.endswith(".doc"):
-            return mammoth.convert_to_text(file).value[:max_chars]            
-        return ""
-
-    except Exception as e:
-        st.error(f"文件 {file.name} 解析出错: {str(e)}")
-        return ""
 
 def render_pdf_images(pdf_file):
     images = []
@@ -380,74 +234,67 @@ def page_syllabus():
         ideology = st.text_area("思政融入点", value="国产工业软件发展、两弹一星精神")
 
         if st.form_submit_button("🚀 结合上传资料生成 OBE 标准大纲"):
-            with st.spinner("正在阅读文档并构思大纲..."):
-                #book_ctx = extract_text_from_file(book_file) if book_file else "未提供教材"
-                plan_ctx = extract_text_from_file(plan_file) if plan_file else "未提供培养方案"   
-                book_ctx = safe_extract_text(book_file) if book_file else "未提供教材"
-                #plan_ctx = safe_extract_text(plan_file) if plan_file else "未提供培养方案"
-                
-                prompt = f"""
-                        你是一位资深的高校工程教育认证专家。请为《{name}》课程撰写一份高质量教学大纲。文字专业且符合OBE理念。
-                        
-                        **严格排版要求：**
-                        1. 禁止使用任何 HTML 标签（如 <br/>, <b> 等）。
-                        2. 所有的表格必须使用标准 Markdown 格式：| 列1 | 列2 |。
-                        3. 必须包含分隔线：| :--- | :--- |。
-                        4. 每个表格上方和下方必须各留一行空行。
-                        
-                        **背景资料（请务必参考以下内容）：**
-                        1. 教材/内容核心：{book_ctx[:12000]} (注：由于长度限制，已截取前1万字符)
-                        2. 专业培养要求：{plan_ctx[:10000]}
-                        
-                        **手工填写的参数：**                    
-                        - 课程性质：{course_type} | 考核方式：{assessment} | 学分：{credits} | 学时：{hours}
-                        - 适用专业：{major} | 思政：{ideology} | 开课学期{semester} | 先修课程及其要求{prerequisites}                   
-                        - 课程目标支撑毕业要求表（含课程目标{obj}
-                        
-                        **大纲必须包含：**
-                        - 课程基本信息表，包含大纲名称、课程名称{name}、英文名称、编码、课程性质{course_type}、适用专业{major}、考核方式{assessment}、总学分{credits}、总 学 时{hours}（理论学时X、实验学时X、实训学时X、其他（讨论）	学时X）、开课学期{semester}、先修课程及其要求{prerequisites}等
-                        - 课程简介（理实结合，不少于200字）
-                        - 建议教材	 
-                        - 参考资料	 
-                        - 教学条件
-                        - 课程目标支撑毕业要求表（含课程目标{obj}、支撑指标点如4.1/5.1及支撑强度H/M/L）
-                        - 德育目标
-                        - 教学内容学时分配表（确保总学时为{hours}）（教学内容参考教材和参考材料{book_ctx}，包含序号、教学内容、学生学习预期成果、计划学时、支撑目标、教学方式、其它（作业、习题、实验等）
-                        - 课程目标考核
-                        - 课程目标达成情况评价
-                        - 考核评价表（包含平时成绩与期末考试占比）                    
-                        - 课程考核，包含标准考试评分标准、作业评分标准
-                        - 大作业评分标准，包含作业内容、评价标准（90-100分	70-89 分	60-69分	0-59分）、所占比重
-                        - 课程思政实施方案（结合：{ideology}），包含思政内容切入点、典型案例、教育载体及方法、预期达到的目标、	体现的价值观或思政元素
-                        
-                        **尤其注意构建《课程目标支撑毕业要求表》时：**
-                        请基于培养方案{plan_ctx}严格以下对应关系生成表格，禁止随意发挥：
-                        1. 课程目标1：{obj.split('课程目标2')[0] if '课程目标2' in obj else obj} 
-                           --> 必须支撑：5.1 (工具使用)。
-                        2. 课程目标2：... (以此类推，请解析用户输入的 {obj})
+            # Prepare extraction
+            book_ctx = safe_extract_text(book_file) if book_file else "未提供教材"
+            plan_ctx = safe_extract_text(plan_file) if plan_file else "未提供培养方案"   
+            
+            # Prepare Agent Inputs
+            inputs = {
+                "course_name": name,
+                "major": major,
+                "course_type": course_type,
+                "hours": hours,
+                "credits": credits,
+                "assessment": assessment,
+                "semester": semester,
+                "prerequisites": prerequisites,
+                "objectives": obj,
+                "ideology": ideology,
+                "textbook_name": book_file.name if book_file else "未提供"
+            }
+            
+            uploaded_texts = {
+                "textbook": book_ctx,
+                "plan": plan_ctx
+            }
+            
+            # Collect Keys
+            keys_config = {
+                "Gemini": ACTIVE_GEMINI_KEY,
+                "Qwen": ACTIVE_QWEN_KEY,
+                "QwenM": ACTIVE_QWENM_KEY,
+                "Baidu": ACTIVE_BAIDU_KEY,
+                "Kimi": ACTIVE_KIMI_KEY,
+                "GLM": ACTIVE_GLM_KEY
+            }
+            
+            # Initialize Agent
+            agent = AgentCore(keys_config, provider=engine_id, model_name=selected_model)
+            
+            # Run Agent Loop with UI Feedback
+            with st.status("🤖 Agent 智能体深度思考中...", expanded=True) as status:
+                final_res = "生成失败"
+                try:
+                    gen = agent.run_syllabus_generation(inputs, uploaded_texts)
+                    for step_log in gen:
+                        if step_log.startswith("✅"):
+                            status.update(label="✅ 大纲生成完成", state="complete", expanded=False)
+                        else:
+                            st.write(step_log)
+                        final_res = step_log # Capture the last yield as result (or modify logic to return separately)
+                except Exception as e:
+                    st.error(f"Agent 运行出错: {str(e)}")
+                    status.update(label="❌ 生成失败", state="error")
+            
+            # Store Result
+            st.session_state.gen_content["syllabus"] = final_res
+            st.session_state['course_name'] = name
+            st.session_state['total_hours'] = hours
+            st.session_state['major'] = major # 适用专业
+            st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
+            st.session_state['ideology_points'] = ideology # 存储思政点
 
-                        **表格格式要求：**
-                        | 课程目标 | 支撑毕业要求及指标点 | 支撑强度 (H/M/L) |
-                        | :--- | :--- | :--- |
-                        | 课程目标1：[简述目标内容] | 5.1 了解常用现代仪器... | H |
-                        | 课程目标2：[简述目标内容] | 5.2 能够选择与使用恰当仪器... | M |
-
-                        **特别注意：**
-                        - 每一行只能对应一个课程目标。
-                        - 每一个课程目标只能对应一个毕业要求及指标点
-                        - 指标点描述必须完整。
-                        - 支撑强度必须根据该目标对指标点的支撑力度给出唯一的 H、M 或 L。                        
-                        """            
-                # 执行生成并存入缓存
-                st.session_state.gen_content["syllabus"] = ai_generate(prompt, engine_id, selected_model)
-                st.session_state['course_name'] = name
-                st.session_state['total_hours'] = hours
-                st.session_state['major'] = major # 适用专业
-                #st.session_state['assessment_method'] = assessment # 考核方式
-                st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
-                st.session_state['ideology_points'] = ideology # 存储思政点，以便日历中安排思政课次                
-
-                st.success("✅ 大纲生成成功！")
+            st.success("✅ 大纲生成成功！")
 
     if st.session_state.gen_content["syllabus"]:
         st.markdown("---")
@@ -644,7 +491,16 @@ def render_teacher_view():
             教学大纲内容：{syl_ctx[:10000]}
             """
             
-            res = ai_generate(split_prompt, engine_id, selected_model)
+            # Collect Keys for Calendar Split
+            keys_config = {
+                "Gemini": ACTIVE_GEMINI_KEY,
+                "Qwen": ACTIVE_QWEN_KEY,
+                "QwenM": ACTIVE_QWENM_KEY,
+                "Baidu": ACTIVE_BAIDU_KEY,
+                "Kimi": ACTIVE_KIMI_KEY,
+                "GLM": ACTIVE_GLM_KEY
+            }
+            res = ai_generate(split_prompt, engine_id, selected_model, keys_config)
             try:
                 # # 1. 解析 JSON
                 # match = re.search(r'\{.*\}', res, re.DOTALL)
