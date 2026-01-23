@@ -61,5 +61,34 @@ def safe_extract_text(file, max_chars=15000):
             return mammoth.convert_to_text(file).value[:max_chars]            
         return ""
 
+
     except Exception as e:
         return "" # Suppress error here, let caller handle or just return empty
+
+# Missing imports for create_docx
+import re
+from docx.shared import Pt
+
+def create_docx(text):
+    if text is None:
+        text = "内容为空"  # 或者直接返回 None    
+    doc = Document()
+    
+    # 1. 首先通过正则表达式清除所有 HTML 标签 (如 <br/>)
+    # 2. 接着通过链式 replace 清除 Markdown 的标题号和加粗符号
+    clean_text = re.sub('<[^<]+?>', '', text) \
+                   .replace("### ", "") \
+                   .replace("## ", "") \
+                   .replace("# ", "") \
+                   .replace("**", "")
+    
+    # 写入 Word
+    for line in clean_text.split('\n'):
+        if line.strip(): # 过滤掉多余的空行
+            p = doc.add_paragraph(line)
+            p.style.font.size = Pt(12)
+    
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+

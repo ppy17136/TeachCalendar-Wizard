@@ -21,7 +21,7 @@ from docxtpl import InlineImage
 from docx.shared import Mm, Pt
 import pandas as pd  # 必须添加，用于数据类型清洗
 # --- New Imports for Agent Architecture ---
-from file_utils import extract_text_from_file, safe_extract_text
+from file_utils import extract_text_from_file, safe_extract_text, create_docx
 from llm_wrapper import ai_generate, ai_ocr
 from agent_core import AgentCore
 
