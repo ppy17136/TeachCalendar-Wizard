@@ -23,12 +23,39 @@ def safe_extract_text(file, max_chars=15000):
     if not file: return ""
     try:
         text_list = []
+        # Support PDF Layout extraction (inspired by Anthropics PDF Skill)
         if file.name.endswith(".pdf"):
-            with fitz.open(stream=file.read(), filetype="pdf") as doc:
-                for page in doc:
-                    text_list.append(page.get_text())
+            # 1. Try pdfplumber with layout detection first (better for columns/tables)
+            with pdfplumber.open(file) as pdf:
+                for page in pdf.pages:
+                    # Strategy: Use layout=True if available, or extract_text defaults
+                    # TWEAK: x_tolerance/y_tolerance can be adjusted for strictness
+                    page_text = page.extract_text(layout=True)
+                    if page_text:
+                        text_list.append(page_text)
+                    
+                    # Check text density. If very low, it might be an image/scanned PDF.
+                    # We can mark it for OCR if needed, but for now we just try extraction.
+                    
+                    # Stop if we have enough
                     if sum(len(t) for t in text_list) > max_chars: break
-            return "".join(text_list)[:max_chars]
+            
+            full_text = "\n".join(text_list)
+            
+            # 2. Fallback check: If text is too short, try raw PyMuPDF (fitz) sometimes handles differently
+            if len(full_text.strip()) < 50:
+                text_list = [] # Reset
+                with fitz.open(stream=file.read(), filetype="pdf") as doc:
+                    for page in doc:
+                        text_list.append(page.get_text())
+                full_text = "".join(text_list)
+                
+                # 3. Final Fallback: If still empty, it's likely a scanned image.
+                # In a robust system, we would trigger OCR here or return a flag.
+                if len(full_text.strip()) < 10:
+                    return "[⚠️ 警告: 该PDF似乎是扫描件或纯图片，无法直接提取文字。请尝试使用包含文字的电子版PDF，或者截图使用 OCR 功能]"
+
+            return full_text[:max_chars]
             
         elif file.name.endswith(".docx"):
             doc = Document(file)
