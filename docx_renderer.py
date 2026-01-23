@@ -56,16 +56,30 @@ class MarkdownToDocx:
                 # Check for divider in next line or previous lines if we missed start
                 # Simplify: valid block is a group of lines containing '|'
                 
-                # Consume all consecutive lines containing '|'
+                # Consume lines. Bridge over single non-pipe lines (like section headers) 
+                # if they are followed by more table content.
                 has_separator = False
-                while i < len(lines) and ('|' in lines[i].strip()):
+                while i < len(lines):
                     l = lines[i].strip()
-                    if '---' in l: has_separator = True
-                    table_lines.append(l)
-                    i += 1
+                    is_pipe_line = '|' in l
+                    
+                    if is_pipe_line:
+                        if '---' in l: has_separator = True
+                        table_lines.append(l)
+                        i += 1
+                    else:
+                        # Check lookahead: is the NEXT line a table line?
+                        # If so, treat this current line as a "Bridge Row" (likely a header)
+                        if (i + 1 < len(lines)) and ('|' in lines[i+1]):
+                            # Treat as a row. We don't wrap in pipes yet, leave that to parser normalization?
+                            # Or better, wrap it now to ensure it's treated as data
+                            table_lines.append(f"| {l} |") 
+                            i += 1
+                        else:
+                            # End of table block
+                            break
                 
                 # If we found a separator, or it looks strongly like a table (multiple columns)
-                # But to avoid false positives with normal text containing |, we require at least 2 lines or a separator
                 if (len(table_lines) >= 2 and any('|' in l for l in table_lines)) or has_separator:
                      self._parse_table(table_lines)
                 else:
@@ -128,6 +142,25 @@ class MarkdownToDocx:
         
         for r_idx, row_data in enumerate(parsed_rows):
             row_cells = table.rows[r_idx].cells
+            
+            # Auto-Merge Logic:
+            # If this row has only 1 data item, but the table has >1 columns, 
+            # assume it's a section header and merge all cells in the row.
+            if len(row_data) == 1 and max_cols > 1:
+                # Merge first and last cell of this row
+                first_cell = row_cells[0]
+                last_cell = row_cells[max_cols - 1]
+                first_cell.merge(last_cell)
+                
+                # Write content to the merged cell
+                first_cell._element.clear_content()
+                p = first_cell.add_paragraph()
+                # Optional: Bold it if it looks like a header (e.g. starts with Part/Chapter/第)
+                # But let's verify if we should force formatting?
+                # Let's just render formatting as is.
+                self._add_run_with_formatting(p, row_data[0])
+                continue
+
             for c_idx, cell_text in enumerate(row_data):
                 if c_idx < len(row_cells):
                     cell = row_cells[c_idx]
