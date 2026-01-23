@@ -22,7 +22,7 @@ from docx.shared import Mm, Pt
 import pandas as pd  # 必须添加，用于数据类型清洗
 # --- New Imports for Agent Architecture ---
 from file_utils import extract_text_from_file, safe_extract_text
-from docx_renderer import create_rich_docx
+from syllabus_renderer import SyllabusRenderer
 from llm_wrapper import ai_generate, ai_ocr
 from agent_core import AgentCore
 
@@ -239,20 +239,30 @@ def page_syllabus():
             book_ctx = safe_extract_text(book_file) if book_file else "未提供教材"
             plan_ctx = safe_extract_text(plan_file) if plan_file else "未提供培养方案"   
             
-            # Prepare Agent Inputs
+            # Prepare Agent Inputs (Updated for JSON Pipeline)
             inputs = {
-                "course_name": name,
-                "major": major,
+                "name": name, 
+                "major": major, 
                 "course_type": course_type,
-                "hours": hours,
                 "credits": credits,
+                "hours": hours,
                 "assessment": assessment,
                 "semester": semester,
                 "prerequisites": prerequisites,
                 "objectives": obj,
-                "ideology": ideology,
-                "textbook_name": book_file.name if book_file else "未提供"
+                "t_book": book_file.name if book_file else "未提供",
+                 # CRITICAL: Pass file path for skills to use
+                "plan_file_path": None 
             }
+            
+            # Save uploaded plan to temp file so pdfplumber can read it
+            if plan_file:
+                # In Streamlit, uploaded_file is a BytesIO. Need to save to disk for 'pdfplumber.open(path)'
+                # or modify skill to take stream. Path is easier for now.
+                temp_path = f"temp_{plan_file.name}"
+                with open(temp_path, "wb") as f:
+                    f.write(plan_file.getbuffer())
+                inputs["plan_file_path"] = temp_path
             
             uploaded_texts = {
                 "textbook": book_ctx,
@@ -274,7 +284,7 @@ def page_syllabus():
             
             # Run Agent Loop with UI Feedback
             with st.status("🤖 Agent 智能体深度思考中...", expanded=True) as status:
-                final_res = "生成失败"
+                final_res = None
                 try:
                     gen = agent.run_syllabus_generation(inputs, uploaded_texts)
                     for step in gen:
@@ -295,19 +305,41 @@ def page_syllabus():
                     status.update(label="❌ 生成失败", state="error")
             
             # Store Result
-            st.session_state.gen_content["syllabus"] = final_res
+            st.session_state.gen_content["syllabus_json"] = final_res
             st.session_state['course_name'] = name
             st.session_state['total_hours'] = hours
-            st.session_state['major'] = major # 适用专业
-            st.session_state['course_objectives'] = obj # 存储原始输入的课程目标文本
-            st.session_state['ideology_points'] = ideology # 存储思政点
+            st.session_state['major'] = major 
+            st.session_state['course_objectives'] = obj 
+            st.session_state['ideology_points'] = ideology 
 
             st.success("✅ 大纲生成成功！")
+            st.rerun()
 
-    if st.session_state.gen_content["syllabus"]:
+    # --- 5.3 结果展示区域 (双轨渲染) ---
+    if st.session_state.gen_content.get("syllabus_json"):
+        data = st.session_state.gen_content["syllabus_json"]
+        
+        # Track 1: UI Markdown Display
+        # Check if it's fallback raw markdown
+        if isinstance(data, dict) and data.get("doc_type") == "raw_markdown":
+            md_content = data["content"]
+            docx_bytes = None 
+            st.warning("⚠️ 使用了降级生成模式 (非结构化)，下载功能受限")
+        else:
+            # Normal Structured Mode
+            md_content = SyllabusRenderer.to_markdown(data)
+            docx_bytes = SyllabusRenderer.to_docx(data)
+            
         st.markdown("---")
-        st.container(border=True).markdown(st.session_state.gen_content["syllabus"])
+        st.container(border=True).markdown(md_content)
+        
         col1, col2 = st.columns(2)
+        if docx_bytes:
+            col1.download_button("💾 下载 Word 版大纲 (完美格式)", docx_bytes, file_name=f"{st.session_state.get('course_name', 'course')}_大纲.docx")
+        else:
+             col1.warning("降级模式不支持完美格式下载")
+             
+        col2.download_button("📝 下载 Markdown", md_content, file_name=f"{st.session_state.get('course_name', 'course')}_大纲.md")
         col1.download_button("💾 下载 Word 版大纲", create_rich_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
         col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
 

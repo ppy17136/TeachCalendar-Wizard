@@ -74,6 +74,46 @@ class SyllabusSkills:
         # assuming the agent decided to "read" the file.
         return text_corpus[:5000] + "\n...(内容过长，仅显示前5000字)"
 
+    def extract_graduation_matrix(self, file_path):
+        """
+        Specialized skill to extract 'Course vs Graduation Requirement' matrix from PDF.
+        Returns a structured list of {requirement, point, strength}
+        """
+        import pdfplumber
+        import os
+        
+        extracted_data = []
+        
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    # 1. Search for keywords in page text first
+                    text = page.extract_text()
+                    if "毕业要求" not in text or "支撑" not in text:
+                        continue
+                        
+                    # 2. Extract tables
+                    tables = page.extract_tables()
+                    for table in tables:
+                        # Heuristic: Check headers for "毕业要求" or "指标点"
+                        # We flatten the table to string to check first
+                        table_str = str(table)
+                        if "毕业要求" in table_str:
+                            # This is likely the target table.
+                            # Naive parsing: assume row contains [Req, Point, Course1, Course2...]
+                            # In reality, we just dump the raw table rows for the LLM to process
+                            # because the layout varies wildly between schools.
+                            extracted_data.extend(table)
+                            
+            if not extracted_data:
+                return "未在PDF中识别到明显的'毕业要求支撑矩阵'表格。"
+                
+            # Convert list of lists to string representation for LLM
+            return json.dumps(extracted_data, ensure_ascii=False)
+            
+        except Exception as e:
+            return f"矩阵提取失败: {str(e)}"
+    
     def generate_section(self, section_name, context_info):
         """
         Skill: 生成大纲的特定章节
