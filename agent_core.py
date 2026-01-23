@@ -77,5 +77,7 @@ class AgentCore:
         yield "🚀 正在生成最终大纲内容 (这可能需要 30 秒)..."
         result = ai_generate(final_prompt, self.provider, self.model_name, self.keys_config)
         
+        # Yield the final result data wrapper
+        yield {"final_result": result}
         yield "✅ 生成完成！"
-        return result
+

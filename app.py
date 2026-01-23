@@ -276,13 +276,20 @@ def page_syllabus():
                 final_res = "生成失败"
                 try:
                     gen = agent.run_syllabus_generation(inputs, uploaded_texts)
-                    for step_log in gen:
+                    for step in gen:
+                        # Check if it's the final result payload
+                        if isinstance(step, dict) and "final_result" in step:
+                            final_res = step["final_result"]
+                            continue
+                        
+                        # Handle normal string logs
+                        step_log = str(step)
                         if step_log.startswith("✅"):
                             status.update(label="✅ 大纲生成完成", state="complete", expanded=False)
                         else:
                             st.write(step_log)
-                        final_res = step_log # Capture the last yield as result (or modify logic to return separately)
                 except Exception as e:
+
                     st.error(f"Agent 运行出错: {str(e)}")
                     status.update(label="❌ 生成失败", state="error")
             
