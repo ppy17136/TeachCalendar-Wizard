@@ -21,7 +21,8 @@ from docxtpl import InlineImage
 from docx.shared import Mm, Pt
 import pandas as pd  # 必须添加，用于数据类型清洗
 # --- New Imports for Agent Architecture ---
-from file_utils import extract_text_from_file, safe_extract_text, create_docx
+from file_utils import extract_text_from_file, safe_extract_text
+from docx_renderer import create_rich_docx
 from llm_wrapper import ai_generate, ai_ocr
 from agent_core import AgentCore
 
@@ -307,7 +308,7 @@ def page_syllabus():
         st.markdown("---")
         st.container(border=True).markdown(st.session_state.gen_content["syllabus"])
         col1, col2 = st.columns(2)
-        col1.download_button("💾 下载 Word 版大纲", create_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
+        col1.download_button("💾 下载 Word 版大纲", create_rich_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
         col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
 
 
