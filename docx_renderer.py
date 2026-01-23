@@ -24,8 +24,9 @@ class MarkdownToDocx:
         if not markdown_text: return
 
         # 0. Pre-process cleanup
-        # Replace <br>, <br/>, <br /> with simple newlines for paragraph splitting
-        text = re.sub(r'<br\s*/?>', '\n', markdown_text)
+        # Replace <br> with a placeholder to prevent splitting table rows
+        # We use a rare string sequence that won't appear in normal text
+        text = re.sub(r'<br\s*/?>', '{{BR}}', markdown_text)
         
         lines = text.split('\n')
         i = 0
@@ -47,21 +48,33 @@ class MarkdownToDocx:
                 continue
 
             # 2. Tables
-            if line.startswith('|'):
-                # Look ahead to see if it's a valid table
+            # Detection logic: A line containing pipes, followed by a separator line
+            # OR a line that looks like a row if we are already in "table mode" (heuristic)
+            if '|' in line:
+                # Look ahead to see if it's a valid table (needs to be followed by divider or be part of one)
                 table_lines = []
-                while i < len(lines) and lines[i].strip().startswith('|'):
-                    table_lines.append(lines[i].strip())
+                # Check for divider in next line or previous lines if we missed start
+                # Simplify: valid block is a group of lines containing '|'
+                
+                # Consume all consecutive lines containing '|'
+                has_separator = False
+                while i < len(lines) and ('|' in lines[i].strip()):
+                    l = lines[i].strip()
+                    if '---' in l: has_separator = True
+                    table_lines.append(l)
                     i += 1
                 
-                if len(table_lines) >= 2:
-                    self._parse_table(table_lines)
+                # If we found a separator, or it looks strongly like a table (multiple columns)
+                # But to avoid false positives with normal text containing |, we require at least 2 lines or a separator
+                if (len(table_lines) >= 2 and any('|' in l for l in table_lines)) or has_separator:
+                     self._parse_table(table_lines)
                 else:
-                    # Not a table, just text starting with |
-                    # Handle formatting even in fallback
-                    p = self.doc.add_paragraph()
-                    self._add_run_with_formatting(p, line)
+                    # Fallback to normal text for single line without separator
+                    for tl in table_lines:
+                         p = self.doc.add_paragraph()
+                         self._add_run_with_formatting(p, tl)
                 continue
+
 
             # 3. List Items
             # Bullet points
@@ -92,16 +105,28 @@ class MarkdownToDocx:
         
         if not data_rows: return
 
-        # Calculate max columns
-        rows = [[cell.strip() for cell in line.strip('|').split('|')] for line in data_rows]
-        max_cols = max(len(r) for r in rows)
+        # Normalize rows: remove leading/trailing pipes if exist, then split
+        # This handles:
+        # | A | B | -> ['A', 'B']
+        # A | B     -> ['A', 'B']
+        parsed_rows = []
+        for line in data_rows:
+            # Smart split: strictly by pipe
+            cells = line.strip().split('|')
+            # Remove empty first/last if result of outer pipes
+            if line.strip().startswith('|') and cells: cells.pop(0)
+            if line.strip().endswith('|') and cells: cells.pop(-1)
+            parsed_rows.append([c.strip() for c in cells])
+
+        if not parsed_rows: return
+
+        max_cols = max(len(r) for r in parsed_rows)
+        if max_cols == 0: return 
         
-        if max_cols == 0: return # Prevent empty table error
-        
-        table = self.doc.add_table(rows=len(rows), cols=max_cols)
+        table = self.doc.add_table(rows=len(parsed_rows), cols=max_cols)
         table.style = 'Table Grid'
         
-        for r_idx, row_data in enumerate(rows):
+        for r_idx, row_data in enumerate(parsed_rows):
             row_cells = table.rows[r_idx].cells
             for c_idx, cell_text in enumerate(row_data):
                 if c_idx < len(row_cells):
@@ -109,6 +134,7 @@ class MarkdownToDocx:
                     cell._element.clear_content()
                     p = cell.add_paragraph()
                     self._add_run_with_formatting(p, cell_text)
+
 
     def _add_run_with_formatting(self, paragraph, text):
         # Improved formatting parser supporting **bold** and *italic*
@@ -140,9 +166,14 @@ class MarkdownToDocx:
                 is_italic = True
                 content = token[1:-1]
                 
-            run = paragraph.add_run(content)
-            run.bold = is_bold
-            run.italic = is_italic
+            # Handle BR placeholders: split by {{BR}} and add breaks
+            sub_parts = content.split('{{BR}}')
+            for idx, sub in enumerate(sub_parts):
+                if idx > 0: 
+                    paragraph.add_run('\n') # Newline in docx run
+                run = paragraph.add_run(sub)
+                run.bold = is_bold
+                run.italic = is_italic
 
     
     def save(self):
