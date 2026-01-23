@@ -121,7 +121,46 @@ class SyllabusSkills:
                          debug_log.append(f"Page {i+1}: No keywords found.")
 
             if not extracted_data:
-                return f"未找到支撑矩阵。调试日志: {'; '.join(debug_log[:5])}..."
+                debug_log.append("Conventional table extraction failed. Attempting Visual OCR Strategy...")
+                
+                # Fallback: Visual OCR Strategy (The "Nuclear Option")
+                # 1. Identify the most likely page (containing "毕业要求" & "支撑")
+                target_page_index = -1
+                max_score = 0
+                
+                with pdfplumber.open(file_path) as pdf:
+                    for i, page in enumerate(pdf.pages):
+                        text = page.extract_text() or ""
+                        score = 0
+                        if "毕业要求" in text: score += 2
+                        if "支撑" in text: score += 2
+                        if "指标点" in text: score += 1
+                        if score > max_score:
+                            max_score = score
+                            target_page_index = i
+                
+                if target_page_index != -1:
+                    # Render this page as image using PyMuPDF (fitz)
+                    import fitz
+                    from llm_wrapper import ai_ocr
+                    
+                    doc = fitz.open(file_path)
+                    page = doc.load_page(target_page_index)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) # High res
+                    img_bytes = pix.tobytes("png")
+                    
+                    ocr_prompt = """
+                    请仔细观察这张图片（培养方案的一页）。
+                    寻找【毕业要求对课程目标的支撑矩阵】或【课程体系对毕业要求支撑关系表】。
+                    如果找到了，请将其中关于本课程（或所有课程）的行提取出来。
+                    请直接以 JSON 列表格式返回数据：[{"req": "毕业要求1", "point": "1.2", "strength": "H"}, ...]
+                    如果没找到，返回 NONE。
+                    """
+                    debug_log.append(f"Sending Page {target_page_index+1} to Visual LLM...")
+                    ocr_result = ai_ocr(img_bytes, ocr_prompt, self.provider, self.model_name, self.keys_config)
+                    return f"基于视觉识别提取的数据：\n{ocr_result}"  
+                
+                return f"未找到支撑矩阵 (OCR也未识别到)。调试日志: {'; '.join(debug_log)}"
                 
             # Truncate if too huge
             json_dump = json.dumps(extracted_data, ensure_ascii=False)
