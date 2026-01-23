@@ -84,9 +84,12 @@ class SyllabusSkills:
         
         extracted_data = []
         
-    def extract_graduation_matrix(self, file_path):
+    def extract_graduation_matrix(self, file_path, course_name="数值模拟"):
         """
         Specialized skill to extract 'Course vs Graduation Requirement' matrix from PDF.
+        Args:
+            file_path: PDF path
+            course_name: Name of the course to find in the matrix
         """
         import pdfplumber
         import os
@@ -94,79 +97,72 @@ class SyllabusSkills:
         extracted_data = []
         debug_log = []
         
+        target_row = None
+        header_row = None
+        
         try:
             with pdfplumber.open(file_path) as pdf:
                 for i, page in enumerate(pdf.pages):
-                    # 1. Text Check (Relaxed)
                     text = page.extract_text() or ""
-                    # If text implies graduation requirements, prioritize this page
-                    score = 0
-                    if "毕业要求" in text: score += 2
-                    if "支撑" in text: score += 2
-                    if "指标点" in text: score += 1
                     
-                    # If page seems relevant (score > 0) OR if text is empty (scanned?), try table extract
-                    if score > 0 or len(text) < 50:
-                        tables = page.extract_tables()
-                        for table in tables:
-                            # Flatten table content to check relevance
-                            table_str = str(table)
-                            # Relaxed Match: Check for 'Requirement' or 'Index' or 'Support'
-                            if "要求" in table_str or "指标" in table_str or "H" in table_str:
-                                extracted_data.extend(table)
-                                debug_log.append(f"Page {i+1}: Found potential matrix table.")
-                            else:
-                                debug_log.append(f"Page {i+1}: Ignored irrelevant table.")
-                    else:
-                         debug_log.append(f"Page {i+1}: No keywords found.")
+                    # 1. Try Table Extraction
+                    tables = page.extract_tables()
+                    for table in tables:
+                        # Clean table data
+                        clean_table = [[(c.strip() if c else "") for c in row] for row in table]
+                        
+                        # A. Search for Header Row (contains "毕业要求" or "指标点" or points like "1.1", "1.2")
+                        # We assume header is one of the first few rows
+                        for row_idx, row in enumerate(clean_table[:5]):
+                            row_str = " ".join(row)
+                            if "毕业要求" in row_str or "指标点" in row_str or "1.1" in row_str:
+                                # Found potential header
+                                if not header_row or len(row) > len(header_row):
+                                    header_row = row
+                                    debug_log.append(f"Found Header on Page {i+1}")
+                        
+                        # B. Search for Course Row
+                        for row in clean_table:
+                            # Fuzzy match course name in the first few columns
+                            # usually course name is in col 0, 1, or 2
+                            row_start = " ".join(row[:4])
+                            # Simple fuzzy: check if key parts of name exist
+                            # e.g. "数值" and "模拟"
+                            name_keywords = [k for k in course_name if k.isalnum()]
+                            # Allow partial match (e.g. if name is short)
+                            if course_name in row_start:
+                                target_row = row
+                                debug_log.append(f"Found Course Row on Page {i+1}: {row}")
+                                break
+                        
+                        if target_row and header_row:
+                            break
+                    
+                    if target_row and header_row:
+                        break
 
-            if not extracted_data:
-                debug_log.append("Conventional table extraction failed. Attempting Visual OCR Strategy...")
+            if target_row and header_row:
+                # Map headers to values
+                mapped_data = []
+                count = min(len(header_row), len(target_row))
+                for c in range(count):
+                    val = target_row[c]
+                    head = header_row[c]
+                    # Check for valid support value (H, M, L, or symbols)
+                    # Some PDFs use checks or filled circles. We assume H/M/L/High/Low for now based on previous info
+                    if val and val in ["H", "M", "L", "High", "Low", "●", "◎", "○", "√"]:
+                        mapped_data.append({"req": "毕业要求", "point": head, "strength": val})
                 
-                # Fallback: Visual OCR Strategy (The "Nuclear Option")
-                # 1. Identify the most likely page (containing "毕业要求" & "支撑")
-                target_page_index = -1
-                max_score = 0
-                
-                with pdfplumber.open(file_path) as pdf:
-                    for i, page in enumerate(pdf.pages):
-                        text = page.extract_text() or ""
-                        score = 0
-                        if "毕业要求" in text: score += 2
-                        if "支撑" in text: score += 2
-                        if "指标点" in text: score += 1
-                        if score > max_score:
-                            max_score = score
-                            target_page_index = i
-                
-                if target_page_index != -1:
-                    # Render this page as image using PyMuPDF (fitz)
-                    import fitz
-                    from llm_wrapper import ai_ocr
-                    
-                    doc = fitz.open(file_path)
-                    page = doc.load_page(target_page_index)
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) # High res
-                    img_bytes = pix.tobytes("png")
-                    
-                    ocr_prompt = """
-                    请仔细观察这张图片（培养方案的一页）。
-                    寻找【毕业要求对课程目标的支撑矩阵】或【课程体系对毕业要求支撑关系表】。
-                    如果找到了，请将其中关于本课程（或所有课程）的行提取出来。
-                    请直接以 JSON 列表格式返回数据：[{"req": "毕业要求1", "point": "1.2", "strength": "H"}, ...]
-                    如果没找到，返回 NONE。
-                    """
-                    debug_log.append(f"Sending Page {target_page_index+1} to Visual LLM...")
-                    ocr_result = ai_ocr(img_bytes, ocr_prompt, self.provider, self.model_name, self.keys_config)
-                    return f"基于视觉识别提取的数据：\n{ocr_result}"  
-                
-                return f"未找到支撑矩阵 (OCR也未识别到)。调试日志: {'; '.join(debug_log)}"
-                
-            # Truncate if too huge
-            json_dump = json.dumps(extracted_data, ensure_ascii=False)
-            if len(json_dump) > 15000:
-                return json_dump[:15000] + "...(truncated)"
-            return json_dump
+                if mapped_data:
+                    return json.dumps(mapped_data, ensure_ascii=False)
+                else:
+                    return f"找到课程行，但未能提取到有效支撑值 (H/M/L). Headers: {header_row}, Row: {target_row}"
+
+            # Fallback: If programmatic search failed, dump debug info
+            return f"未能精确定位课程 '{course_name}' 的支撑数据。Debug: {'; '.join(debug_log)}"
+            
+        except Exception as e:
+            return f"矩阵提取异常: {str(e)}"
             
         except Exception as e:
             return f"矩阵提取异常: {str(e)}"

@@ -29,9 +29,11 @@ class AgentCore:
         # 1. Check for Training Plan PDF to extract Matrix
         graduation_matrix_context = "未提供培养方案，需根据通用标准推导。"
         if "plan_file_path" in user_inputs and user_inputs["plan_file_path"]:
-             yield "🔍 正在深入解析培养方案PDF (寻找毕业要求支撑矩阵)..."
-             matrix_data = self.skills.extract_graduation_matrix(user_inputs["plan_file_path"])
-             graduation_matrix_context = f"从PDF提取的支撑矩阵数据（请严格据此生成）：\n{matrix_data[:3000]}" # Limit size
+             yield "🔍 正在深入解析培养方案PDF (定位本课程支撑数据)..."
+             # Use the exact course name for row searching
+             c_name = user_inputs.get('name', '')
+             matrix_data = self.skills.extract_graduation_matrix(user_inputs["plan_file_path"], course_name=c_name)
+             graduation_matrix_context = f"从PDF提取的支撑矩阵数据（这是本课程的精确数据，请直接使用）：\n{matrix_data}"
         
         # 2. Construct the "System 2" Prompt (JSON Schema Enforcement)
         system_prompt = f"""
