@@ -21,7 +21,13 @@ class MarkdownToDocx:
         style.element.rPr.rFonts.set(qn('w:eastAsia'), 'SimSun')
 
     def add_markdown_content(self, markdown_text):
-        lines = markdown_text.split('\n')
+        if not markdown_text: return
+
+        # 0. Pre-process cleanup
+        # Replace <br>, <br/>, <br /> with simple newlines for paragraph splitting
+        text = re.sub(r'<br\s*/?>', '\n', markdown_text)
+        
+        lines = text.split('\n')
         i = 0
         while i < len(lines):
             line = lines[i].strip()
@@ -42,7 +48,7 @@ class MarkdownToDocx:
 
             # 2. Tables
             if line.startswith('|'):
-                # Look ahead to see if it's a valid table (needs at least header + separate line)
+                # Look ahead to see if it's a valid table
                 table_lines = []
                 while i < len(lines) and lines[i].strip().startswith('|'):
                     table_lines.append(lines[i].strip())
@@ -52,20 +58,25 @@ class MarkdownToDocx:
                     self._parse_table(table_lines)
                 else:
                     # Not a table, just text starting with |
-                    self.doc.add_paragraph(line)
+                    # Handle formatting even in fallback
+                    p = self.doc.add_paragraph()
+                    self._add_run_with_formatting(p, line)
                 continue
 
             # 3. List Items
-            if line.startswith('- ') or line.startswith('* '):
-                self.doc.add_paragraph(line[2:], style='List Bullet')
+            # Bullet points
+            if re.match(r'^[\-\*]\s+', line):
+                clean_text = re.sub(r'^[\-\*]\s+', '', line)
+                p = self.doc.add_paragraph(style='List Bullet')
+                self._add_run_with_formatting(p, clean_text)
                 i += 1
                 continue
                 
-            # 4. Numbered Lists
-            if re.match(r'^\d+\.', line):
-                # Remove number and dot
-                text = re.sub(r'^\d+\.\s*', '', line)
-                self.doc.add_paragraph(text, style='List Number')
+            # 4. Numbered Lists (Relaxed regex: allow zero spaces after dot)
+            if re.match(r'^\d+\.\s*', line):
+                clean_text = re.sub(r'^\d+\.\s*', '', line)
+                p = self.doc.add_paragraph(style='List Number')
+                self._add_run_with_formatting(p, clean_text)
                 i += 1
                 continue
 
@@ -85,6 +96,8 @@ class MarkdownToDocx:
         rows = [[cell.strip() for cell in line.strip('|').split('|')] for line in data_rows]
         max_cols = max(len(r) for r in rows)
         
+        if max_cols == 0: return # Prevent empty table error
+        
         table = self.doc.add_table(rows=len(rows), cols=max_cols)
         table.style = 'Table Grid'
         
@@ -92,20 +105,46 @@ class MarkdownToDocx:
             row_cells = table.rows[r_idx].cells
             for c_idx, cell_text in enumerate(row_data):
                 if c_idx < len(row_cells):
-                    # We can use the formatting parser here too if we want bold in tables
-                    # But for now simple text
-                    row_cells[c_idx].text = cell_text
+                    cell = row_cells[c_idx]
+                    cell._element.clear_content()
+                    p = cell.add_paragraph()
+                    self._add_run_with_formatting(p, cell_text)
 
     def _add_run_with_formatting(self, paragraph, text):
-        # Support **Bold** parsing
-        parts = re.split(r'(\*\*.*?\*\*)', text)
-        for part in parts:
-            if part.startswith('**') and part.endswith('**'):
-                run = paragraph.add_run(part[2:-2])
-                run.bold = True
-            else:
-                paragraph.add_run(part)
+        # Improved formatting parser supporting **bold** and *italic*
+        # We use a tokenizing approach for robustness
+        
+        # 1. Clean HTML
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # 2. Tokenize by formatting markers
+        # Split by **...** or *...* or __...__
+        # This simple regex matches bold (** or __) and italic (*)
+        # Note: non-greedy match
+        tokens = re.split(r'(\*\*.*?\*\*|__.*?__|(?<!\*)\*(?!\*).*?(?<!\*)\*(?!\*))', text)
+        
+        for token in tokens:
+            if not token: continue
+            
+            is_bold = False
+            is_italic = False
+            content = token
+            
+            if token.startswith('**') and token.endswith('**'):
+                is_bold = True
+                content = token[2:-2]
+            elif token.startswith('__') and token.endswith('__'):
+                is_bold = True
+                content = token[2:-2]
+            elif token.startswith('*') and token.endswith('*') and len(token) > 2:
+                is_italic = True
+                content = token[1:-1]
+                
+            run = paragraph.add_run(content)
+            run.bold = is_bold
+            run.italic = is_italic
 
+    
     def save(self):
         bio = io.BytesIO()
         self.doc.save(bio)
