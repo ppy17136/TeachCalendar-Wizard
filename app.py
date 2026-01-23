@@ -340,8 +340,7 @@ def page_syllabus():
              col1.warning("降级模式不支持完美格式下载")
              
         col2.download_button("📝 下载 Markdown", md_content, file_name=f"{st.session_state.get('course_name', 'course')}_大纲.md")
-        col1.download_button("💾 下载 Word 版大纲", create_rich_docx(st.session_state.gen_content["syllabus"]), file_name=f"{name}_大纲.docx")
-        col2.download_button("📝 下载文本版 (TXT)", st.session_state.gen_content["syllabus"], file_name=f"{name}_大纲.txt")        
+
 
 
 
