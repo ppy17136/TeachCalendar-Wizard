@@ -86,86 +86,63 @@ class SyllabusSkills:
         
     def extract_graduation_matrix(self, file_path, course_name="数值模拟"):
         """
-        Specialized skill to extract 'Course vs Graduation Requirement' matrix from PDF.
-        Args:
-            file_path: PDF path
-            course_name: Name of the course to find in the matrix
+        Specialized skill to extract 'Course vs Graduation Requirement' matrix using Semantic Page Parsing.
         """
         import pdfplumber
         import os
         
-        extracted_data = []
-        debug_log = []
-        
-        target_row = None
-        header_row = None
-        
         try:
+            target_page_text = ""
+            debug_log = []
+            
             with pdfplumber.open(file_path) as pdf:
                 for i, page in enumerate(pdf.pages):
                     text = page.extract_text() or ""
-                    
-                    # 1. Try Table Extraction
-                    tables = page.extract_tables()
-                    for table in tables:
-                        # Clean table data
-                        clean_table = [[(c.strip() if c else "") for c in row] for row in table]
-                        
-                        # A. Search for Header Row (contains "毕业要求" or "指标点" or points like "1.1", "1.2")
-                        # We assume header is one of the first few rows
-                        for row_idx, row in enumerate(clean_table[:5]):
-                            row_str = " ".join(row)
-                            if "毕业要求" in row_str or "指标点" in row_str or "1.1" in row_str:
-                                # Found potential header
-                                if not header_row or len(row) > len(header_row):
-                                    header_row = row
-                                    debug_log.append(f"Found Header on Page {i+1}")
-                        
-                        # B. Search for Course Row
-                        for row in clean_table:
-                            # Fuzzy match course name in the first few columns
-                            # usually course name is in col 0, 1, or 2
-                            row_start = " ".join(row[:4])
-                            # Simple fuzzy: check if key parts of name exist
-                            # e.g. "数值" and "模拟"
-                            name_keywords = [k for k in course_name if k.isalnum()]
-                            # Allow partial match (e.g. if name is short)
-                            if course_name in row_start:
-                                target_row = row
-                                debug_log.append(f"Found Course Row on Page {i+1}: {row}")
-                                break
-                        
-                        if target_row and header_row:
+                    # 1. Locate the page with the course name
+                    if course_name in text:
+                        # Double check if this page looks like a matrix (has H/M/L or "支撑")
+                        if "H" in text or "支撑" in text or "●" in text:
+                            target_page_text = text
+                            debug_log.append(f"Found course '{course_name}' on Page {i+1}. Extracting full text...")
                             break
-                    
-                    if target_row and header_row:
-                        break
+                        else:
+                            debug_log.append(f"Found course on Page {i+1} but missing matrix keywords.")
 
-            if target_row and header_row:
-                # Map headers to values
-                mapped_data = []
-                count = min(len(header_row), len(target_row))
-                for c in range(count):
-                    val = target_row[c]
-                    head = header_row[c]
-                    # Check for valid support value (H, M, L, or symbols)
-                    # Some PDFs use checks or filled circles. We assume H/M/L/High/Low for now based on previous info
-                    if val and val in ["H", "M", "L", "High", "Low", "●", "◎", "○", "√"]:
-                        mapped_data.append({"req": "毕业要求", "point": head, "strength": val})
-                
-                if mapped_data:
-                    return json.dumps(mapped_data, ensure_ascii=False)
-                else:
-                    return f"找到课程行，但未能提取到有效支撑值 (H/M/L). Headers: {header_row}, Row: {target_row}"
+            if not target_page_text:
+                return f"未找到包含课程 '{course_name}' 且具备支撑关系特征的页面。Log: {'; '.join(debug_log)}"
 
-            # Fallback: If programmatic search failed, dump debug info
-            return f"未能精确定位课程 '{course_name}' 的支撑数据。Debug: {'; '.join(debug_log)}"
+            # 2. Semantic Extraction (LLM)
+            # Send the raw text of the page to the LLM to parse the row.
+            extraction_prompt = f"""
+            你是一个PDF数据解析器。下面是培养方案中某一页的原始文本（可能是一张乱序的大表格）。
             
-        except Exception as e:
-            return f"矩阵提取异常: {str(e)}"
+            你的任务：从中提取课程《{course_name}》对毕业要求的支撑关系。
             
+            原始文本：
+            {target_page_text[:3000]}
+            
+            请分析文本中的行结构，找到该课程对应的那一行，并结合表头（通常在文本上方，包含"毕业要求1", "1.1"等），提取所有支撑点。
+            
+            常见支撑符号：H(高), M(中), L(低), 或 ●, ◎, √.
+            
+            请以纯 JSON 列表格式返回（不要Markdown标记）：
+            [
+              {{ "req": "毕业要求1", "point": "1.2 问题分析", "strength": "H" }},
+              {{ "req": "毕业要求3", "point": "3.1 设计能力", "strength": "M" }}
+            ]
+            如果未找到有效数据，返回空列表 []。
+            """
+            
+            res = ai_generate(extraction_prompt, self.provider, self.model_name, self.keys_config)
+            
+            # Simple cleanup
+            if "```" in res:
+                res = res.replace("```json", "").replace("```", "")
+            
+            return res.strip()
+
         except Exception as e:
-            return f"矩阵提取异常: {str(e)}"
+            return f"语义解析异常: {str(e)}"
     
     def generate_section(self, section_name, context_info):
         """
